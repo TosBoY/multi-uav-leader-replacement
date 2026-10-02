@@ -1,20 +1,16 @@
-# Python virtual environment
+# Environment
 .venv/
 
-# Python cache
+# Python
 __pycache__/
-*.py[cod]
+*.pyc
+*.egg-info/
+.pytest_cache/
 
-# VS Code
-.vscode/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Simulation output
-results/
-plots/
-
-# OS files
+# Editor / OS
+.idea/
 .DS_Store
 Thumbs.db
+
+# Experiment output
+results/
