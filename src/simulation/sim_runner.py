@@ -217,6 +217,15 @@ def run_simulation(
 		controllers[drone] = SE3Control(quad_params)
 		states[drone] = state
 
+	print(
+		f"Created {len(drones)} UAVs. "
+		f"UAV {initial_leader} is the initial leader."
+	)
+	if leader_failure_time is not None:
+		print(
+			f"Leader failure scheduled at t = {leader_failure_time:.2f} s."
+		)
+
 	num_steps = int(t_final * sim_rate) + 1
 	dt = 1.0 / sim_rate
 	time_history = np.zeros(num_steps)
@@ -250,6 +259,7 @@ def run_simulation(
 			and promotion_time is None
 			and time >= leader_failure_time
 		):
+			failed_leader = active_leader
 			failed_drones.add(active_leader)
 			active_drones.remove(active_leader)
 			if not active_drones:
@@ -265,6 +275,10 @@ def run_simulation(
 			active_drones.insert(0, active_leader)
 			offsets[active_leader] = np.zeros(3)
 			promotion_time = time
+			print(
+				f"UAV {failed_leader} failed at t = {time:.2f} s. "
+				f"UAV {active_leader} promoted to leader."
+			)
 
 		leader_history[step] = active_leader
 		for failed_drone in failed_drones:
@@ -324,7 +338,17 @@ def run_simulation(
 		"promotion_time": promotion_time,
 	}
 
+	print("Simulation finished.")
+	for drone in drones:
+		index = drone_indices[drone]
+		print(
+			f"UAV {drone}: start {position_history[0, index]} -> "
+			f"end {position_history[-1, index]}"
+		)
+	print(f"Time steps: {len(time_history)}")
+
 	if show_display:
+		print("Opening leader-promotion animation...")
 		_display_simulation(results)
 
 	return results

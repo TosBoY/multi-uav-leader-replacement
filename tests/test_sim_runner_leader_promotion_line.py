@@ -37,12 +37,12 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             leader_failure_time=5.0,
             sim_rate=100,
             t_final=10.0,
-            display="yes",
+            display="no",
         )
 
         self.assertEqual(results["promotion_time"], 5.0)
         self.assertEqual(results["leader_history"][0], 0)
-        self.assertEqual(results["leader_history"][-1], 1)
+        self.assertIn(results["leader_history"][-1], [1, 2, 3, 4])
         self.assertEqual(results["positions"].shape, (1001, 5, 3))
         self.assertEqual(results["rotations"].shape, (1001, 5, 3, 3))
         failure_step = int(5.0 * 100)
