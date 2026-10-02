@@ -37,7 +37,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             leader_failure_time=5.0,
             sim_rate=100,
             t_final=10.0,
-            display="no",
+            display=True,
         )
 
         self.assertEqual(results["promotion_time"], 5.0)

@@ -4,18 +4,16 @@ from collections.abc import Callable, Mapping, Sequence
 import random
 from typing import Any, TypeVar
 
-import matplotlib.pyplot as plt
 import numpy as np
 from scipy.spatial.transform import Rotation
 
 from rotorpy.controllers.quadrotor_control import SE3Control
-from rotorpy.utils.animate import animate
 from rotorpy.vehicles.crazyflie_params import quad_params
 from rotorpy.vehicles.multirotor import Multirotor
 from rotorpy.wind.default_winds import NoWind
-from rotorpy.world import World
 
 from election.random_election import elect_random_leader
+from simulation.display import display_simulation
 
 
 Drone = TypeVar("Drone")
@@ -68,52 +66,6 @@ def _normalise_positions(
 		drone: np.asarray(position, dtype=float).copy()
 		for drone, position in zip(drones, positions)
 	}
-
-
-def _display_simulation(results: Mapping[str, Any]) -> Any:
-	"""Display recorded drone paths and animate the completed simulation."""
-	world = World.empty((-8, 4, -3, 3, -2, 3))
-	drones = results["drones"]
-	positions = results["positions"]
-
-	fig_3d = plt.figure("Leader Promotion Simulation")
-	ax = fig_3d.add_subplot(projection="3d")
-	world.draw(ax)
-	for index, drone in enumerate(drones):
-		path = positions[:, index, :]
-		ax.plot3D(
-			path[:, 0],
-			path[:, 1],
-			path[:, 2],
-			".",
-			label=f"Drone {drone}",
-		)
-
-	leader_history = results["leader_history"]
-	promotion_steps = np.flatnonzero(leader_history != leader_history[0])
-	if promotion_steps.size:
-		promotion_step = promotion_steps[0]
-		promoted_leader = leader_history[promotion_step]
-		promoted_index = drones.index(promoted_leader)
-		ax.scatter(
-			*positions[promotion_step, promoted_index],
-			color="green",
-			marker="*",
-			s=100,
-			label=f"Drone {promoted_leader} promoted",
-		)
-	ax.legend()
-
-	animation = animate(
-		results["time"],
-		positions,
-		results["rotations"],
-		results["wind"],
-		animate_wind=False,
-		world=world,
-	)
-	plt.show()
-	return animation
 
 
 def run_simulation(
@@ -349,6 +301,6 @@ def run_simulation(
 
 	if show_display:
 		print("Opening leader-promotion animation...")
-		_display_simulation(results)
+		display_simulation(results)
 
 	return results
