@@ -56,10 +56,18 @@ def elect_closest_leader(
         raise ValueError("At least one drone other than the current leader is required.")
 
     leader_position = coordinates[current_leader]
-    return min(
-        candidates,
-        key=lambda drone: sum(
+    squared_distances = {
+        drone: sum(
             (candidate - leader) ** 2
             for candidate, leader in zip(coordinates[drone], leader_position)
-        ),
-    )
+        )
+        for drone in candidates
+    }
+
+    for drone in candidates:
+        print(
+            f"Distance from leader {current_leader} to drone {drone}: "
+            f"{math.sqrt(squared_distances[drone]):.6f}"
+        )
+
+    return min(candidates, key=squared_distances.__getitem__)

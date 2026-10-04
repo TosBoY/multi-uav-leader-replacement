@@ -1,6 +1,6 @@
 """Reusable RotorPy simulation runner for leader/follower drone teams."""
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 import random
 from typing import Any, TypeVar
 
@@ -12,12 +12,11 @@ from rotorpy.vehicles.crazyflie_params import quad_params
 from rotorpy.vehicles.multirotor import Multirotor
 from rotorpy.wind.default_winds import NoWind
 
-from election.random_election import elect_random_leader
+from election.election import ElectionType, elect_new_leader
 from simulation.display import display_simulation
 
 
 Drone = TypeVar("Drone")
-ElectionFunction = Callable[[Sequence[Drone], random.Random | None], Drone]
 
 
 def _make_initial_state(position: Sequence[float]) -> dict[str, np.ndarray]:
@@ -74,7 +73,7 @@ def run_simulation(
 	initial_positions: Mapping[Drone, Sequence[float]] | Sequence[Sequence[float]],
 	leader_path: Any,
 	leader_failure_time: float | None,
-	election_type: ElectionFunction = elect_random_leader,
+	election_type: ElectionType = "random",
 	*,
 	formation_offsets: Mapping[Drone, Sequence[float]] | None = None,
 	sim_rate: int = 100,
@@ -94,15 +93,13 @@ def run_simulation(
 			return the flat-output dictionary expected by ``SE3Control``.
 		leader_failure_time: Time at which the current leader fails. Pass
 			``None`` to run without a leader failure or election.
-		election_type: Election function receiving the active drone list and a
-			random generator. It must return one active drone. The default is
-			``elect_random_leader``.
+		election_type: Election strategy to use: ``"random"`` or ``"closest"``.
 		formation_offsets: Optional fixed offsets from the leader for each drone.
 			If omitted, offsets are inferred from the initial positions. The
 			promoted leader receives the zero offset; other drones retain theirs.
 		sim_rate: Simulation frequency in Hz.
 		t_final: Simulation duration in seconds.
-		random_seed: Optional seed passed to the election function.
+		random_seed: Optional seed passed to the random election strategy.
 		display: Use ``"yes"`` to show the 3D plot and animation after the
 			simulation, or ``"no"`` to return results without opening a window.
 			Boolean values are also accepted.
@@ -217,7 +214,17 @@ def run_simulation(
 			if not active_drones:
 				raise ValueError("The failed leader was the only active drone.")
 
-			promoted_leader = election_type(active_drones, election_rng)
+			current_positions = {
+				drone: states[drone]["x"].copy()
+				for drone in drones
+			}
+			promoted_leader = elect_new_leader(
+				drones=drones,
+				positions=current_positions,
+				election_type=election_type,
+				failed_drone=failed_leader,
+				rng=election_rng,
+			)
 			if promoted_leader not in active_drones:
 				raise ValueError(
 					"The election function must return an active drone."
