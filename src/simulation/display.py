@@ -10,15 +10,48 @@ from rotorpy.utils.animate import animate
 from rotorpy.world import World
 
 
+def _scene_bounds(positions: np.ndarray) -> tuple[float, float, float, float, float, float]:
+	"""Calculate padded world bounds from all finite recorded positions."""
+	finite_positions = positions[np.isfinite(positions).all(axis=2)]
+	if finite_positions.size == 0:
+		raise ValueError("Simulation results contain no finite drone positions.")
+
+	minimum = np.min(finite_positions, axis=0)
+	maximum = np.max(finite_positions, axis=0)
+	span = maximum - minimum
+	padding = np.maximum(span * 0.1, 1.0)
+	minimum -= padding
+	maximum += padding
+	return (
+		float(minimum[0]),
+		float(maximum[0]),
+		float(minimum[1]),
+		float(maximum[1]),
+		float(minimum[2]),
+		float(maximum[2]),
+	)
+
+
 def display_simulation(results: Mapping[str, Any]) -> Any:
 	"""Display recorded drone paths and animate the completed simulation."""
-	world = World.empty((-8, 4, -3, 3, -2, 3))
 	drones = results["drones"]
 	positions = results["positions"]
+	scene_bounds = _scene_bounds(positions)
+	world = World.empty(scene_bounds)
 
 	fig_3d = plt.figure("Leader Promotion Simulation")
 	ax = fig_3d.add_subplot(projection="3d")
 	world.draw(ax)
+	ax.set_xlim(scene_bounds[0], scene_bounds[1])
+	ax.set_ylim(scene_bounds[2], scene_bounds[3])
+	ax.set_zlim(scene_bounds[4], scene_bounds[5])
+	ax.set_box_aspect(
+		(
+			scene_bounds[1] - scene_bounds[0],
+			scene_bounds[3] - scene_bounds[2],
+			scene_bounds[5] - scene_bounds[4],
+		)
+	)
 	for index, drone in enumerate(drones):
 		path = positions[:, index, :]
 		ax.plot3D(

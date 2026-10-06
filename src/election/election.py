@@ -5,11 +5,12 @@ import random
 from typing import Literal, TypeVar
 
 from election.centroid_election import elect_closest_leader
+from election.furthest_election import elect_furthest_leader
 from election.random_election import elect_random_leader
 
 
 Drone = TypeVar("Drone")
-ElectionType = Literal["random", "closest"]
+ElectionType = Literal["random", "closest", "furthest"]
 
 
 def elect_new_leader(
@@ -24,7 +25,8 @@ def elect_new_leader(
     Args:
         drones: Identifiers of all drones participating in the election.
         positions: Current position of every drone, keyed by drone identifier.
-        election_type: Strategy to use: ``"random"`` or ``"closest"``.
+        election_type: Strategy to use: ``"random"``, ``"closest"``, or
+            ``"furthest"``.
         failed_drone: Identifier of the drone that failed and cannot be elected.
         rng: Optional seeded random generator used by the random strategy.
 
@@ -56,9 +58,15 @@ def elect_new_leader(
             positions,
             failed_drone,
         )
+    elif election_type == "furthest":
+        elected_drone = elect_furthest_leader(
+            drones,
+            positions,
+            failed_drone,
+        )
     else:
         raise ValueError(
-            'election_type must be either "random" or "closest".'
+            'election_type must be "random", "closest", or "furthest".'
         )
 
     if elected_drone not in active_drones:

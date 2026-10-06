@@ -15,16 +15,16 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
         """Promote a random follower after the initial leader fails."""
         drones = [0, 1, 2, 3, 4]
         initial_positions = {
-            0: [-2.0, 0.0, 1.0],
-            1: [-2.8, -1.0, 1.0],
-            2: [-2.8, 1.0, 1.0],
-            3: [-1.2, -1.0, 1.0],
-            4: [-1.2, 1.0, 1.0],
+            0: [0, 0.0, 1.0],
+            1: [-1, -1, 1.0],
+            2: [-2, -2, 1.0],
+            3: [-1, 1, 1.0],
+            4: [-2, 2, 1.0],
         }
         leader_path = ConstantSpeed(
-            init_pos=np.array(initial_positions[0]),
-            dist=5.0,
-            speed=0.5,
+            init_pos=np.array(initial_positions[0]),    
+            dist=20.0,
+            speed=5,
             axis=0,
             yaw_traj="forward",
         )
