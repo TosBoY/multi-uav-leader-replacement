@@ -25,8 +25,6 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
         leader_speed = 1
         leader_heading = 0.0
         simulation_time = 10.0
-        failure_time = simulation_time / 2.0
-
         leader_path = make_leader_path(
             path_type="line",
             first_waypoint=initial_positions[0],
@@ -41,7 +39,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             initial_leader=0,
             initial_positions=initial_positions,
             leader_path=leader_path,
-            leader_failure_time=failure_time,
+            leader_failure_time= None,
             election_type="closest",
             route_aligned_formation=True,
             sim_rate=100,

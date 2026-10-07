@@ -11,6 +11,8 @@ dependencies = [
     "scipy",
     "matplotlib",
     "rotorpy",
+    "pandas",
+    "pyarrow",
 ]
 
 [tool.setuptools.packages.find]

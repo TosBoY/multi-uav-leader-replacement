@@ -14,6 +14,7 @@ from rotorpy.wind.default_winds import NoWind
 
 from election.election import ElectionType, elect_new_leader
 from simulation.display import display_simulation
+from utils.save_data import save_simulation_data
 
 
 Drone = TypeVar("Drone")
@@ -123,6 +124,7 @@ def run_simulation(
 	t_final: float = 10.0,
 	random_seed: int | None = None,
 	display: bool | str = "no",
+	save_data: bool = False,
 ) -> dict[str, Any]:
 	"""Run a configurable RotorPy leader/follower simulation.
 
@@ -148,6 +150,8 @@ def run_simulation(
 		display: Use ``"yes"`` to show the 3D plot and animation after the
 			simulation, or ``"no"`` to return results without opening a window.
 			Boolean values are also accepted.
+		save_data: If ``True``, save the recorded simulation data to
+			``results/data/simulation_data.parquet``.
 
 	Returns:
 		A dictionary containing time, positions, rotations, wind, leader history,
@@ -179,6 +183,8 @@ def run_simulation(
 		show_display = display
 	else:
 		raise TypeError('display must be either "yes", "no", or a boolean.')
+	if not isinstance(save_data, bool):
+		raise TypeError("save_data must be a boolean.")
 
 	positions = _normalise_positions(drones, initial_positions)
 	if any(position.shape != (3,) for position in positions.values()):
@@ -378,6 +384,9 @@ def run_simulation(
 			f"end {position_history[-1, index]}"
 		)
 	print(f"Time steps: {len(time_history)}")
+	if save_data:
+		saved_path = save_simulation_data(results)
+		print(f"Simulation data saved to {saved_path}")
 
 	if show_display:
 		print("Opening leader-promotion animation...")
