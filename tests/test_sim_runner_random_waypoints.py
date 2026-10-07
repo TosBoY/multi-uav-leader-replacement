@@ -3,9 +3,8 @@
 import unittest
 
 import numpy as np
-from rotorpy.trajectories.minsnap import MinSnap
 
-from pathing.random_waypoints import generate_random_waypoints
+from pathing.path_maker import make_leader_path
 from simulation.sim_runner import run_simulation
 
 
@@ -19,7 +18,8 @@ class TestSimRunnerRandomWaypoints(unittest.TestCase):
         leader_speed = 1
         leader_heading = 0.0
         simulation_time = 10.0
-        waypoints = generate_random_waypoints(
+        leader_path = make_leader_path(
+            path_type="random",
             first_waypoint=leader_start,
             velocity=leader_speed,
             time=simulation_time,
@@ -27,17 +27,6 @@ class TestSimRunnerRandomWaypoints(unittest.TestCase):
             # seed=42,
             print_waypoints=True,
         )
-        leader_path = MinSnap(
-            waypoints,
-            v_avg=int(leader_speed),
-            verbose=False,
-        )
-
-        for index, waypoint in enumerate(waypoints):
-            actual_position = leader_path.update(
-                float(leader_path.t_keyframes[index])
-            )["x"]
-            np.testing.assert_allclose(actual_position, waypoint, atol=1e-6)
 
         initial_positions = {
             0: leader_start.tolist(),

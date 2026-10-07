@@ -45,6 +45,17 @@ def _line_axis(initial_heading: float) -> int:
     )
 
 
+def _validate_waypoint_path(path: Any, waypoints: np.ndarray) -> None:
+    """Verify that a trajectory reaches each supplied waypoint."""
+    for index, waypoint in enumerate(waypoints):
+        actual_position = path.update(float(path.t_keyframes[index]))["x"]
+        if not np.allclose(actual_position, waypoint, atol=1e-6):
+            raise RuntimeError(
+                f"Generated path missed waypoint {index}: "
+                f"expected {waypoint}, got {actual_position}."
+            )
+
+
 def make_leader_path(
     path_type: PathType,
     first_waypoint: Sequence[float] | np.ndarray,
@@ -97,11 +108,13 @@ def make_leader_path(
             print_waypoints=print_waypoints,
             initial_heading=initial_heading,
         )
-        return MinSnap(
+        path = MinSnap(
             waypoints,
             v_avg=max(1, int(speed)),
             verbose=False,
         )
+        _validate_waypoint_path(path, waypoints)
+        return path
 
     if path_type == "line":
         if speed == 0:
