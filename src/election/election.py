@@ -19,6 +19,7 @@ def elect_new_leader(
     election_type: ElectionType,
     failed_drone: Drone,
     rng: random.Random | None = None,
+    print_election: bool = False,
 ) -> Drone:
     """Elect a replacement leader after a drone failure.
 
@@ -57,12 +58,14 @@ def elect_new_leader(
             drones,
             positions,
             failed_drone,
+            print_election=print_election,
         )
     elif election_type == "furthest":
         elected_drone = elect_furthest_leader(
             drones,
             positions,
             failed_drone,
+            print_election=print_election,
         )
     else:
         raise ValueError(

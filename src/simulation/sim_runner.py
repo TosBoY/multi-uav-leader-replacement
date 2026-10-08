@@ -117,6 +117,7 @@ def run_simulation(
 	leader_path: Any,
 	leader_failure_time: float | None,
 	election_type: ElectionType = "random",
+	print_election: bool = False,
 	*,
 	formation_offsets: Mapping[Drone, Sequence[float]] | None = None,
 	route_aligned_formation: bool = False,
@@ -290,6 +291,7 @@ def run_simulation(
 				election_type=election_type,
 				failed_drone=failed_leader,
 				rng=election_rng,
+				print_election=print_election,
 			)
 			if promoted_leader not in active_drones:
 				raise ValueError(

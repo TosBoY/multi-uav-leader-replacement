@@ -12,6 +12,7 @@ def elect_closest_leader(
     drones: Sequence[Drone],
     positions: Mapping[Drone, Sequence[float]],
     current_leader: Drone,
+    print_election: bool = False,
 ) -> Drone:
     """Return the active drone closest to the current leader.
 
@@ -64,10 +65,12 @@ def elect_closest_leader(
         for drone in candidates
     }
 
-    for drone in candidates:
-        print(
-            f"Distance from leader {current_leader} to drone {drone}: "
-            f"{math.sqrt(squared_distances[drone]):.6f}"
-        )
+    if print_election:
+        print(f"Current leader: {current_leader}")
+        for drone in candidates:
+            print(
+                f"Distance from leader {current_leader} to drone {drone}: "
+                f"{math.sqrt(squared_distances[drone]):.6f}"
+            )
 
     return min(candidates, key=squared_distances.__getitem__)

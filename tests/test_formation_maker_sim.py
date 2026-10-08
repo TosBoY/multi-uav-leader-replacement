@@ -21,7 +21,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             number_of_drones=len(drones),
             formation_type="leader_follower",
             shape="circle",
-            spread=2.0,
+            spread=1.0,
             dimension=3,
             plane="xz",
             leader_index=initial_leader,
@@ -30,6 +30,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
         leader_speed = 1
         leader_heading = 0.0
         simulation_time = 10.0
+        leader_failure_time = simulation_time / 2.0
         leader_path = make_leader_path(
             path_type="random",
             first_waypoint=initial_positions[initial_leader],
@@ -45,13 +46,14 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             initial_leader=initial_leader,
             initial_positions=initial_positions,
             leader_path=leader_path,
-            leader_failure_time= None,
+            leader_failure_time= leader_failure_time,
             election_type="closest",
             route_aligned_formation=True,
             sim_rate=100,
             t_final=simulation_time,
-            display=True,
+            display=False,
             save_data=False,
+            print_election=True,
         )
 
         self.assertEqual(results["promotion_time"], 5.0)
