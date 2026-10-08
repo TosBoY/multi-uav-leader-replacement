@@ -6,6 +6,7 @@ import numpy as np
 
 from simulation.sim_runner import run_simulation
 from pathing.path_maker import make_leader_path
+from formation.formation_maker import make_formation
 
 
 class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
@@ -14,22 +15,24 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
     def test_path_maker_to_sim_runner(self):
         """Promote a random follower after the initial leader fails."""
         drones = [0, 1, 2, 3, 4]
+        initial_leader = 0
         leader_start = np.array([0, 0.0, 1.0])
-        initial_positions = {
-            0: leader_start.tolist(),
-            1: (leader_start + np.array([-1, -1, 0.0])).tolist(),
-            2: (leader_start + np.array([-2, -2, 0.0])).tolist(),
-            3: (leader_start + np.array([-1, 1, 0.0])).tolist(),
-            4: (leader_start + np.array([-2, 2, 0.0])).tolist(),
-        }
+        initial_positions = make_formation(
+            number_of_drones=len(drones),
+            formation_type="leader_follower",
+            shape="circle",
+            spread=2.0,
+            dimension=3,
+            plane="xz",
+            leader_index=initial_leader,
+            leader_position=leader_start,
+        )
         leader_speed = 1
         leader_heading = 0.0
         simulation_time = 10.0
-        failure_time = simulation_time / 2.0
-
         leader_path = make_leader_path(
             path_type="random",
-            first_waypoint=initial_positions[0],
+            first_waypoint=initial_positions[initial_leader],
             velocity=leader_speed,
             time=simulation_time,
             initial_heading=leader_heading,
@@ -39,20 +42,20 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
 
         results = run_simulation(
             drones=drones,
-            initial_leader=0,
+            initial_leader=initial_leader,
             initial_positions=initial_positions,
             leader_path=leader_path,
-            leader_failure_time=failure_time,
+            leader_failure_time= None,
             election_type="closest",
             route_aligned_formation=True,
             sim_rate=100,
             t_final=simulation_time,
             display=True,
-            save_data=True,
+            save_data=False,
         )
 
         self.assertEqual(results["promotion_time"], 5.0)
-        self.assertEqual(results["leader_history"][0], 0)
+        self.assertEqual(results["leader_history"][0], initial_leader)
         self.assertIn(results["leader_history"][-1], [1, 2, 3, 4])
         self.assertEqual(results["positions"].shape, (1001, 5, 3))
         self.assertEqual(results["rotations"].shape, (1001, 5, 3, 3))

@@ -32,16 +32,8 @@ def _scene_bounds(positions: np.ndarray) -> tuple[float, float, float, float, fl
 	)
 
 
-def display_simulation(results: Mapping[str, Any]) -> Any:
-	"""Display recorded drone paths and animate the completed simulation."""
-	drones = results["drones"]
-	positions = results["positions"]
-	scene_bounds = _scene_bounds(positions)
-	world = World.empty(scene_bounds)
-
-	fig_3d = plt.figure("Leader Promotion Simulation")
-	ax = fig_3d.add_subplot(projection="3d")
-	world.draw(ax)
+def _apply_scene_bounds(ax: Any, scene_bounds: tuple[float, float, float, float, float, float]) -> None:
+	"""Apply tight simulation bounds and proportional 3D scaling to an axis."""
 	ax.set_xlim(scene_bounds[0], scene_bounds[1])
 	ax.set_ylim(scene_bounds[2], scene_bounds[3])
 	ax.set_zlim(scene_bounds[4], scene_bounds[5])
@@ -52,6 +44,19 @@ def display_simulation(results: Mapping[str, Any]) -> Any:
 			scene_bounds[5] - scene_bounds[4],
 		)
 	)
+
+
+def display_simulation(results: Mapping[str, Any]) -> Any:
+	"""Display recorded drone paths and animate the completed simulation."""
+	drones = results["drones"]
+	positions = results["positions"]
+	scene_bounds = _scene_bounds(positions)
+	world = World.empty(scene_bounds)
+
+	fig_3d = plt.figure("Leader Promotion Simulation")
+	ax = fig_3d.add_subplot(projection="3d")
+	world.draw(ax)
+	_apply_scene_bounds(ax, scene_bounds)
 	for index, drone in enumerate(drones):
 		path = positions[:, index, :]
 		ax.plot3D(
@@ -85,5 +90,8 @@ def display_simulation(results: Mapping[str, Any]) -> Any:
 		animate_wind=False,
 		world=world,
 	)
+	animation_figure = getattr(animation, "_fig", None)
+	if animation_figure is not None and animation_figure.axes:
+		_apply_scene_bounds(animation_figure.axes[0], scene_bounds)
 	plt.show()
 	return animation

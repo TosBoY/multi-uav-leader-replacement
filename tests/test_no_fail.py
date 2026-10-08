@@ -26,12 +26,13 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
         leader_heading = 0.0
         simulation_time = 10.0
         leader_path = make_leader_path(
-            path_type="line",
+            path_type="random",
             first_waypoint=initial_positions[0],
             velocity=leader_speed,
             time=simulation_time,
             initial_heading=leader_heading,
             print_waypoints=True,
+            seed=42,
         )
 
         results = run_simulation(
