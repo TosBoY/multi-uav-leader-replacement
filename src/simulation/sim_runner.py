@@ -14,11 +14,11 @@ from rotorpy.wind.default_winds import NoWind
 
 from election.election import ElectionType, elect_new_leader
 from simulation.display import display_simulation
+from utils.print_path import print_path as save_print_path
 from utils.save_data import save_simulation_data
 
 
 Drone = TypeVar("Drone")
-
 
 def _make_initial_state(
 	position: Sequence[float] | np.ndarray,
@@ -126,6 +126,7 @@ def run_simulation(
 	random_seed: int | None = None,
 	display: bool | str = "no",
 	save_data: bool = False,
+	print_path: bool = False,
 ) -> dict[str, Any]:
 	"""Run a configurable RotorPy leader/follower simulation.
 
@@ -152,7 +153,9 @@ def run_simulation(
 			simulation, or ``"no"`` to return results without opening a window.
 			Boolean values are also accepted.
 		save_data: If ``True``, save the recorded simulation data to
-			``results/data/simulation_data.parquet``.
+			an automatically timestamped Parquet file in ``results/data``.
+		print_path: If ``True``, save the positions fed to each drone's
+			controller at every timestamp to a timestamped CSV file.
 
 	Returns:
 		A dictionary containing time, positions, rotations, wind, leader history,
@@ -186,6 +189,8 @@ def run_simulation(
 		raise TypeError('display must be either "yes", "no", or a boolean.')
 	if not isinstance(save_data, bool):
 		raise TypeError("save_data must be a boolean.")
+	if not isinstance(print_path, bool):
+		raise TypeError("print_path must be a boolean.")
 
 	positions = _normalise_positions(drones, initial_positions)
 	if any(position.shape != (3,) for position in positions.values()):
@@ -248,6 +253,7 @@ def run_simulation(
 	position_history = np.zeros((num_steps, len(drones), 3))
 	quat_history = np.zeros((num_steps, len(drones), 4))
 	wind_history = np.zeros((num_steps, len(drones), 3))
+	intended_position_history = np.zeros((num_steps, len(drones), 3))
 	leader_history = np.empty(num_steps, dtype=object)
 	failed_history = np.zeros((num_steps, len(drones)), dtype=bool)
 
@@ -265,6 +271,13 @@ def run_simulation(
 	promotion_time = None
 	leader_history[0] = active_leader
 	wind_profile = NoWind()
+	initial_path_flat = leader_path.update(0.0)
+	for drone in drones:
+		index = drone_indices[drone]
+		if drone == initial_leader:
+			intended_position_history[0, index] = initial_path_flat["x"]
+		else:
+			intended_position_history[0, index] = positions[initial_leader] + offsets[drone]
 
 	for step in range(1, num_steps):
 		time = step * dt
@@ -308,6 +321,7 @@ def run_simulation(
 			)
 
 		leader_history[step] = active_leader
+		intended_position_history[step] = intended_position_history[step - 1]
 		for failed_drone in failed_drones:
 			failed_history[step, drone_indices[failed_drone]] = True
 
@@ -334,6 +348,7 @@ def run_simulation(
 					desired_offset = offsets[drone]
 				desired_position = leader_position + desired_offset
 				flat_output = _make_flat_output(path_flat, desired_position)
+			intended_position_history[step, drone_indices[drone]] = flat_output["x"]
 			controls[drone] = controllers[drone].update(
 				time,
 				states[drone],
@@ -389,6 +404,13 @@ def run_simulation(
 	if save_data:
 		saved_path = save_simulation_data(results)
 		print(f"Simulation data saved to {saved_path}")
+	if print_path:
+		path_data_path = save_print_path(
+			intended_position_history,
+			time_history,
+			drones,
+		)
+		print(f"Intended path data saved to {path_data_path}")
 
 	if show_display:
 		print("Opening leader-promotion animation...")
