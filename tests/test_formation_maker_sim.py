@@ -20,7 +20,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
         initial_positions = make_formation(
             number_of_drones=len(drones),
             formation_type="leader_follower",
-            shape="line_x",
+            shape="arrow",
             spread=1.0,
             dimension=3,
             plane="xz",
@@ -32,13 +32,13 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
         simulation_time = 10.0
         leader_failure_time = simulation_time / 2.0
         leader_path = make_leader_path(
-            path_type="line",
+            path_type="random",
             first_waypoint=initial_positions[initial_leader],
             velocity=leader_speed,
             time=simulation_time,
             initial_heading=leader_heading,
             print_waypoints=True,
-            seed=42,
+            seed=None,
         )
 
         results = run_simulation(
@@ -47,13 +47,12 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             initial_positions=initial_positions,
             leader_path=leader_path,
             leader_failure_time= leader_failure_time,
-            election_type="closest",
-            route_aligned_formation=True,
+            election_type="minimum_travel",
             sim_rate=100,
             t_final=simulation_time,
-            display=False,
-            save_data=True,
-            print_path=True,
+            display=True,
+            save_data=False,
+            print_path=False,
             print_election=True,
         )
 

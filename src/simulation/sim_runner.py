@@ -120,10 +120,10 @@ def run_simulation(
 	print_election: bool = False,
 	*,
 	formation_offsets: Mapping[Drone, Sequence[float]] | None = None,
-	route_aligned_formation: bool = False,
+	route_aligned_formation: bool = True,
 	sim_rate: int = 100,
 	t_final: float = 10.0,
-	random_seed: int | None = None,
+	random_election_seed: int | None = None,
 	display: bool | str = "no",
 	save_data: bool = False,
 	print_path: bool = False,
@@ -140,7 +140,8 @@ def run_simulation(
 			return the flat-output dictionary expected by ``SE3Control``.
 		leader_failure_time: Time at which the current leader fails. Pass
 			``None`` to run without a leader failure or election.
-		election_type: Election strategy to use: ``"random"`` or ``"closest"``.
+		election_type: Election strategy to use: ``"random"``, ``"closest"``,
+			``"furthest"``, or ``"minimum_travel"``.
 		formation_offsets: Optional fixed offsets from the leader for each drone.
 			If omitted, offsets are inferred from the initial positions. The
 			promoted leader receives the zero offset; other drones retain theirs.
@@ -148,7 +149,7 @@ def run_simulation(
 			the leader's current three-dimensional direction of travel.
 		sim_rate: Simulation frequency in Hz.
 		t_final: Simulation duration in seconds.
-		random_seed: Optional seed passed to the random election strategy.
+		random_election_seed: Optional seed passed to the random election strategy.
 		display: Use ``"yes"`` to show the 3D plot and animation after the
 			simulation, or ``"no"`` to return results without opening a window.
 			Boolean values are also accepted.
@@ -253,6 +254,7 @@ def run_simulation(
 	position_history = np.zeros((num_steps, len(drones), 3))
 	quat_history = np.zeros((num_steps, len(drones), 4))
 	wind_history = np.zeros((num_steps, len(drones), 3))
+	travel_distance_history = np.zeros((num_steps, len(drones)))
 	intended_position_history = np.zeros((num_steps, len(drones), 3))
 	leader_history = np.empty(num_steps, dtype=object)
 	failed_history = np.zeros((num_steps, len(drones)), dtype=bool)
@@ -267,7 +269,7 @@ def run_simulation(
 	active_drones = list(drones)
 	failed_drones: set[Drone] = set()
 	active_leader = initial_leader
-	election_rng = random.Random(random_seed)
+	election_rng = random.Random(random_election_seed)
 	promotion_time = None
 	leader_history[0] = active_leader
 	wind_profile = NoWind()
@@ -298,6 +300,10 @@ def run_simulation(
 				drone: states[drone]["x"].copy()
 				for drone in drones
 			}
+			current_travel_distances = [
+				(drone, travel_distance_history[step - 1, drone_indices[drone]])
+				for drone in drones
+			]
 			promoted_leader = elect_new_leader(
 				drones=drones,
 				positions=current_positions,
@@ -305,6 +311,7 @@ def run_simulation(
 				failed_drone=failed_leader,
 				rng=election_rng,
 				print_election=print_election,
+				travel_distances=current_travel_distances,
 			)
 			if promoted_leader not in active_drones:
 				raise ValueError(
@@ -321,6 +328,7 @@ def run_simulation(
 			)
 
 		leader_history[step] = active_leader
+		travel_distance_history[step] = travel_distance_history[step - 1]
 		intended_position_history[step] = intended_position_history[step - 1]
 		for failed_drone in failed_drones:
 			failed_history[step, drone_indices[failed_drone]] = True
@@ -373,6 +381,9 @@ def run_simulation(
 				dt,
 			)
 			position_history[step, index] = states[drone]["x"]
+			travel_distance_history[step, index] += np.linalg.norm(
+				states[drone]["x"] - position_history[step - 1, index]
+			)
 			quat_history[step, index] = states[drone]["q"]
 			wind_history[step, index] = states[drone]["wind"]
 
@@ -386,6 +397,7 @@ def run_simulation(
 		"drones": drones,
 		"time": time_history,
 		"positions": position_history,
+		"travel_distances": travel_distance_history,
 		"rotations": rotation_history,
 		"wind": wind_history,
 		"leader_history": leader_history,

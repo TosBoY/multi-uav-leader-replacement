@@ -6,11 +6,12 @@ from typing import Literal, TypeVar
 
 from election.centroid_election import elect_closest_leader
 from election.furthest_election import elect_furthest_leader
+from election.minimum_travel_election import elect_minimum_travel_leader
 from election.random_election import elect_random_leader
 
 
 Drone = TypeVar("Drone")
-ElectionType = Literal["random", "closest", "furthest"]
+ElectionType = Literal["random", "closest", "furthest", "minimum_travel"]
 
 
 def elect_new_leader(
@@ -20,6 +21,7 @@ def elect_new_leader(
     failed_drone: Drone,
     rng: random.Random | None = None,
     print_election: bool = False,
+    travel_distances: Sequence[tuple[Drone, float]] | None = None,
 ) -> Drone:
     """Elect a replacement leader after a drone failure.
 
@@ -67,9 +69,20 @@ def elect_new_leader(
             failed_drone,
             print_election=print_election,
         )
+    elif election_type == "minimum_travel":
+        if travel_distances is None:
+            raise ValueError(
+                "travel_distances are required for minimum_travel election."
+            )
+        elected_drone = elect_minimum_travel_leader(
+            travel_distances,
+            old_leader=failed_drone,
+            print_election=print_election,
+        )
     else:
         raise ValueError(
-            'election_type must be "random", "closest", or "furthest".'
+            'election_type must be "random", "closest", "furthest", '
+            'or "minimum_travel".'
         )
 
     if elected_drone not in active_drones:
