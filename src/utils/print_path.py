@@ -10,7 +10,9 @@ import numpy as np
 
 
 Drone = TypeVar("Drone")
-_DATA_DIRECTORY = Path(__file__).resolve().parents[2] / "results" / "data"
+_DATA_DIRECTORY = (
+    Path(__file__).resolve().parents[2] / "results" / "data" / "trajectories"
+)
 
 
 def print_path(

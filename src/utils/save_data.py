@@ -3,28 +3,34 @@
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 
 
 _DATA_DIRECTORY = Path(__file__).resolve().parents[2] / "results" / "data"
+RunType = Literal["fail", "nonfail"]
 
 
 def save_simulation_data(
     results: Mapping[str, Any],
+    run_type: RunType,
     output_path: str | Path | None = None,
 ) -> Path:
     """Save one row per drone and timestamp to a Parquet file.
 
     Args:
         results: Results dictionary returned by ``run_simulation``.
+        run_type: ``"fail"`` or ``"nonfail"``; selects the output folder.
         output_path: Optional output file. If omitted, a timestamped file is
             created in ``results/data`` in the project root.
 
     Returns:
         The path of the written Parquet file.
     """
+    if run_type not in {"fail", "nonfail"}:
+        raise ValueError('run_type must be either "fail" or "nonfail".')
+
     drones = results["drones"]
     times = results["time"]
     positions = results["positions"]
@@ -68,7 +74,11 @@ def save_simulation_data(
 
     if output_path is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        destination = _DATA_DIRECTORY / f"simulation_data_{timestamp}.parquet"
+        destination = (
+            _DATA_DIRECTORY
+            / run_type
+            / f"simulation_data_{timestamp}.parquet"
+        )
     else:
         destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)

@@ -48,6 +48,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             sim_rate=100,
             t_final=simulation_time,
             display=True,
+            run_type="fail",
             save_data=True,
         )
 

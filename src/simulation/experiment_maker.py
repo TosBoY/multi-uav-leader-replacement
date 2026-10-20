@@ -9,6 +9,7 @@ from election.election import ElectionType
 from formation.formation_maker import FormationPlane, FormationShape, FormationType, make_formation
 from pathing.path_maker import PathType, make_leader_path
 from simulation.sim_runner import run_simulation
+from utils.save_data import RunType
 
 
 def make_experiment(
@@ -34,6 +35,7 @@ def make_experiment(
     sim_rate: int = 100,
     random_election_seed: int | None = None,
     display: bool | str = "no",
+    run_type: RunType | None = None,
     save_data: bool = False,
     print_path: bool = False,
 ) -> dict[str, Any]:
@@ -93,6 +95,7 @@ def make_experiment(
         t_final=simulation_time,
         random_election_seed=random_election_seed,
         display=display,
+        run_type=run_type,
         save_data=save_data,
         print_path=print_path,
     )

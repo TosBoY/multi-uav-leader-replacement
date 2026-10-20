@@ -48,6 +48,7 @@ class TestSimRunnerRandomWaypoints(unittest.TestCase):
             sim_rate=100,
             t_final=simulation_time,
             display=True,
+            run_type="fail",
         )
 
         expected_promotion_time = np.ceil(failure_time * 100) / 100
