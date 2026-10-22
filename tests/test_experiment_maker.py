@@ -26,7 +26,6 @@ class TestExperimentMaker(unittest.TestCase):
             election_type="minimum_travel",
             sim_rate=100,
             display=False,
-            run_type="fail",
             save_data=True,
             print_path=True,
         )

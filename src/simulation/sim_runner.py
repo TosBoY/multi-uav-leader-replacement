@@ -15,7 +15,7 @@ from rotorpy.wind.default_winds import NoWind
 from election.election import ElectionType, elect_new_leader
 from simulation.display import display_simulation
 from utils.print_path import print_path as save_print_path
-from utils.save_data import RunType, save_simulation_data
+from utils.save_data import save_simulation_data
 
 
 Drone = TypeVar("Drone")
@@ -125,7 +125,8 @@ def run_simulation(
 	t_final: float = 10.0,
 	random_election_seed: int | None = None,
 	display: bool | str = "no",
-	run_type: RunType | None = None,
+	save_data_filename: str | None = None,
+	print_path_filename: str | None = None,
 	save_data: bool = False,
 	print_path: bool = False,
 ) -> dict[str, Any]:
@@ -151,7 +152,9 @@ def run_simulation(
 		sim_rate: Simulation frequency in Hz.
 		t_final: Simulation duration in seconds.
 		random_election_seed: Optional seed passed to the random election strategy.
-		run_type: Required run classification: ``"fail"`` or ``"nonfail"``.
+		save_data_filename: Optional Parquet filename inside ``results/data``.
+		print_path_filename: Optional CSV filename inside
+			``results/data/trajectories``.
 		display: Use ``"yes"`` to show the 3D plot and animation after the
 			simulation, or ``"no"`` to return results without opening a window.
 			Boolean values are also accepted.
@@ -181,8 +184,6 @@ def run_simulation(
 		raise ValueError("t_final cannot be negative.")
 	if leader_failure_time is not None and leader_failure_time < 0:
 		raise ValueError("leader_failure_time cannot be negative.")
-	if run_type not in {"fail", "nonfail"}:
-		raise ValueError('run_type must be either "fail" or "nonfail".')
 	if isinstance(display, str):
 		display_value = display.strip().lower()
 		if display_value not in {"yes", "no"}:
@@ -418,13 +419,17 @@ def run_simulation(
 		)
 	print(f"Time steps: {len(time_history)}")
 	if save_data:
-		saved_path = save_simulation_data(results, run_type)
+		saved_path = save_simulation_data(
+			results,
+			output_filename=save_data_filename,
+		)
 		print(f"Simulation data saved to {saved_path}")
 	if print_path:
 		path_data_path = save_print_path(
 			intended_position_history,
 			time_history,
 			drones,
+			output_filename=print_path_filename,
 		)
 		print(f"Intended path data saved to {path_data_path}")
 

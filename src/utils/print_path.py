@@ -20,12 +20,17 @@ def print_path(
     times: Sequence[float] | np.ndarray,
     drones: Sequence[Drone],
     output_path: str | Path | None = None,
+    output_filename: str | Path | None = None,
 ) -> Path:
     """Save controller target positions for every drone and timestamp to CSV."""
     if intended_positions.shape != (len(times), len(drones), 3):
         raise ValueError("intended_positions must have shape (time, drone, 3).")
 
-    if output_path is None:
+    if output_path is not None and output_filename is not None:
+        raise ValueError("Specify either output_path or output_filename, not both.")
+    if output_filename is not None:
+        destination = _DATA_DIRECTORY / Path(output_filename)
+    elif output_path is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         destination = _DATA_DIRECTORY / f"simulation_path_{timestamp}.csv"
     else:

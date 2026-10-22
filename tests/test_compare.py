@@ -54,7 +54,6 @@ class TestSimRunnerSavedData(unittest.TestCase):
             sim_rate=self.sim_rate,
             t_final=self.simulation_time,
             display=False,
-            run_type="fail" if leader_failure_time is not None else "nonfail",
             save_data=True,
         )
 

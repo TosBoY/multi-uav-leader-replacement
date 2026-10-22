@@ -32,7 +32,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             time=simulation_time,
             initial_heading=leader_heading,
             print_waypoints=True,
-            seed=42,
+            seed=4,
         )
 
         results = run_simulation(
@@ -45,9 +45,8 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             route_aligned_formation=True,
             sim_rate=100,
             t_final=simulation_time,
-            display=True,
-            run_type="nonfail",
-            save_data=True,
+            display=False,
+            save_data=False,
         )
 
         self.assertEqual(results["promotion_time"], 5.0)
