@@ -1,25 +1,22 @@
 """Generate and edit the experiment runs setup table."""
 
-from collections.abc import Iterable, Iterator, Mapping, Sequence
-import csv
+from collections.abc import Iterator
 from pathlib import Path
 import tempfile
+
+import duckdb
 
 try:
     from experiments.setup.common import (
         REGISTRY_DIRECTORY,
         setup_path,
         validate_choice,
-        validate_columns,
-        write_csv_rows,
     )
 except ModuleNotFoundError:
     from common import (
         REGISTRY_DIRECTORY,
         setup_path,
         validate_choice,
-        validate_columns,
-        write_csv_rows,
     )
 
 
@@ -41,49 +38,58 @@ DEFAULT_FORMATIONS_FILE = setup_path("formations.csv")
 DEFAULT_RUNS_FILE = REGISTRY_DIRECTORY / "runs.csv"
 
 
-def _read_ids(path: str | Path, id_column: str) -> list[int]:
-    """Read one integer identifier column from a registry CSV."""
-    with Path(path).open("r", newline="", encoding="utf-8") as csv_file:
-        reader = csv.DictReader(csv_file)
-        validate_columns(list(reader.fieldnames or []), [id_column, *[field for field in reader.fieldnames or [] if field != id_column]])
-        values = [int(row[id_column]) for row in reader]
-    if not values:
-        raise ValueError(f"{path} does not contain any rows.")
-    return values
-
-
-def _run_rows(
-    path_ids: Iterable[int],
-    formation_ids: Iterable[int],
-) -> Iterator[dict[str, object]]:
-    """Yield all run rows in path-major, formation-minor order."""
-    runs_id = 1
-    for path_id in path_ids:
-        for formation_id in formation_ids:
-            yield {
-                "runs_id": runs_id,
-                "path_id": path_id,
-                "formation_id": formation_id,
-                "leader_failure_enabled": False,
-                "fail_time": "",
-                "init_leader": 0,
-                "election_type": ELECTION_TYPES[0],
-                "status": "planned",
-            }
-            runs_id += 1
-            for fail_time in FAIL_TIMES:
-                for election_type in ELECTION_TYPES:
-                    yield {
-                        "runs_id": runs_id,
-                        "path_id": path_id,
-                        "formation_id": formation_id,
-                        "leader_failure_enabled": True,
-                        "fail_time": fail_time,
-                        "init_leader": 0,
-                        "election_type": election_type,
-                        "status": "planned",
-                    }
-                    runs_id += 1
+_RUN_SELECT = """
+WITH path_ids AS (
+    SELECT DISTINCT CAST(path_id AS BIGINT) AS path_id
+    FROM read_csv_auto(?)
+),
+formation_ids AS (
+    SELECT DISTINCT CAST(formation_id AS BIGINT) AS formation_id
+    FROM read_csv_auto(?)
+),
+combinations AS (
+    SELECT path_id, formation_id
+    FROM path_ids CROSS JOIN formation_ids
+),
+run_rows AS (
+    SELECT
+        path_id,
+        formation_id,
+        FALSE AS leader_failure_enabled,
+        CAST(NULL AS DOUBLE) AS fail_time,
+        0 AS init_leader,
+        'closest' AS election_type,
+        'planned' AS status,
+        0 AS row_order
+    FROM combinations
+    UNION ALL
+    SELECT
+        combinations.path_id,
+        combinations.formation_id,
+        TRUE AS leader_failure_enabled,
+        fail_times.fail_time,
+        0 AS init_leader,
+        election_types.election_type,
+        'planned' AS status,
+        1 AS row_order
+    FROM combinations
+    CROSS JOIN (SELECT range / 2.0 AS fail_time FROM range(5, 16)) AS fail_times
+    CROSS JOIN (VALUES ('closest'), ('minimum_travel')) AS election_types(election_type)
+)
+SELECT
+    ROW_NUMBER() OVER (
+        ORDER BY path_id, formation_id, row_order, fail_time, election_type
+    ) AS runs_id,
+    path_id,
+    formation_id,
+    leader_failure_enabled,
+    fail_time,
+    init_leader,
+    election_type,
+    status
+FROM run_rows
+ORDER BY runs_id
+"""
 
 
 def generate_runs(
@@ -91,9 +97,15 @@ def generate_runs(
     formations_path: str | Path = DEFAULT_FORMATIONS_FILE,
 ) -> Iterator[dict[str, object]]:
     """Yield runs for every path/formation pair."""
-    path_ids = _read_ids(paths_path, "path_id")
-    formation_ids = _read_ids(formations_path, "formation_id")
-    return _run_rows(path_ids, formation_ids)
+    with duckdb.connect() as connection:
+        result = connection.execute(
+            _RUN_SELECT,
+            [str(paths_path), str(formations_path)],
+        )
+        columns = [description[0] for description in result.description]
+        while rows := result.fetchmany(8192):
+            for row in rows:
+                yield dict(zip(columns, row))
 
 
 def make_runs_csv(
@@ -104,10 +116,11 @@ def make_runs_csv(
     """Stream all generated runs into the runs registry CSV."""
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=RUN_COLUMNS)
-        writer.writeheader()
-        writer.writerows(generate_runs(paths_path, formations_path))
+    with duckdb.connect() as connection:
+        connection.execute(
+            f"COPY ({_RUN_SELECT}) TO ? (HEADER, DELIMITER ',')",
+            [str(paths_path), str(formations_path), str(destination)],
+        )
     return destination
 
 
@@ -130,31 +143,61 @@ def edit_run(
     if not source.exists():
         raise FileNotFoundError(source)
 
-    changed = False
+    temporary_path = _update_csv_with_duckdb(source, runs_id, updates)
+    if temporary_path is None:
+        raise ValueError(f"No run with runs_id={runs_id} exists.")
+    return source
+
+
+def _update_csv_with_duckdb(
+    source: Path,
+    runs_id: int,
+    updates: dict[str, object],
+    same_configuration: bool = False,
+) -> Path | None:
+    """Update one CSV row through a DuckDB temporary table."""
     with tempfile.NamedTemporaryFile(
         mode="w",
-        newline="",
-        encoding="utf-8",
+        suffix=".csv",
         dir=source.parent,
         delete=False,
     ) as temporary_file:
         temporary_path = Path(temporary_file.name)
-        writer = csv.DictWriter(temporary_file, fieldnames=RUN_COLUMNS)
-        with source.open("r", newline="", encoding="utf-8") as csv_file:
-            reader = csv.DictReader(csv_file)
-            validate_columns(list(reader.fieldnames or []), RUN_COLUMNS)
-            writer.writeheader()
-            for row in reader:
-                if int(row["runs_id"]) == runs_id:
-                    row.update({field: str(value) for field, value in updates.items()})
-                    changed = True
-                writer.writerow(row)
 
-    if not changed:
+    try:
+        with duckdb.connect() as connection:
+            connection.execute(
+                "CREATE TEMP TABLE runs AS SELECT * FROM read_csv_auto(?)",
+                [str(source)],
+            )
+            selected = connection.execute(
+                "SELECT path_id, formation_id FROM runs WHERE runs_id = ?",
+                [runs_id],
+            ).fetchone()
+            if selected is None:
+                return None
+            if same_configuration:
+                where_clause = "path_id = ? AND formation_id = ?"
+                where_values = [selected[0], selected[1]]
+            else:
+                where_clause = "runs_id = ?"
+                where_values = [runs_id]
+            for field, value in updates.items():
+                connection.execute(
+                    f'UPDATE runs SET "{field}" = ? WHERE {where_clause}',
+                    [value, *where_values],
+                )
+            columns = ", ".join(f'"{column}"' for column in RUN_COLUMNS)
+            connection.execute(
+                f"COPY (SELECT {columns} FROM runs ORDER BY runs_id) "
+                "TO ? (HEADER, DELIMITER ',')",
+                [str(temporary_path)],
+            )
+        temporary_path.replace(source)
+        return temporary_path
+    except Exception:
         temporary_path.unlink(missing_ok=True)
-        raise ValueError(f"No run with runs_id={runs_id} exists.")
-    temporary_path.replace(source)
-    return source
+        raise
 
 
 def edit_run_status(
@@ -162,11 +205,22 @@ def edit_run_status(
     new_status: str,
     output_path: str | Path = DEFAULT_RUNS_FILE,
 ) -> Path:
-    """Update the status of one run for the experiment runner."""
+    """Update one run status, propagating infeasibility by configuration."""
     if not isinstance(run_id, int) or isinstance(run_id, bool):
         raise TypeError("run_id must be an integer.")
     validate_choice(new_status, RUN_STATUSES, "new_status")
-    return edit_run(run_id, output_path, status=new_status)
+    source = Path(output_path)
+    if not source.exists():
+        raise FileNotFoundError(source)
+    updated = _update_csv_with_duckdb(
+        source,
+        run_id,
+        {"status": new_status},
+        same_configuration=new_status == "infeasible",
+    )
+    if updated is None:
+        raise ValueError(f"No run with runs_id={run_id} exists.")
+    return source
 
 
 def ensure_status_column(output_path: str | Path = DEFAULT_RUNS_FILE) -> Path:
@@ -175,28 +229,28 @@ def ensure_status_column(output_path: str | Path = DEFAULT_RUNS_FILE) -> Path:
     if not source.exists():
         raise FileNotFoundError(source)
 
-    with source.open("r", newline="", encoding="utf-8") as csv_file:
-        reader = csv.DictReader(csv_file)
-        fieldnames = list(reader.fieldnames or [])
-        if fieldnames == RUN_COLUMNS:
-            return source
-        validate_columns(fieldnames, RUN_COLUMNS[:-1])
+    with duckdb.connect() as connection:
+        columns = [row[0] for row in connection.execute(
+            "DESCRIBE SELECT * FROM read_csv_auto(?)", [str(source)]
+        ).fetchall()]
+    if columns == RUN_COLUMNS:
+        return source
+    if columns != RUN_COLUMNS[:-1]:
+        raise ValueError(f"CSV columns must be {RUN_COLUMNS[:-1]}, got {columns}.")
 
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            newline="",
-            encoding="utf-8",
-            dir=source.parent,
-            delete=False,
-        ) as temporary_file:
-            temporary_path = Path(temporary_file.name)
-            writer = csv.DictWriter(temporary_file, fieldnames=RUN_COLUMNS)
-            writer.writeheader()
-            for row in reader:
-                row["status"] = "planned"
-                writer.writerow(row)
-
-    temporary_path.replace(source)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", dir=source.parent, delete=False) as temporary_file:
+        temporary_path = Path(temporary_file.name)
+    try:
+        with duckdb.connect() as connection:
+            connection.execute(
+                "COPY (SELECT *, 'planned' AS status FROM read_csv_auto(?)) "
+                "TO ? (HEADER, DELIMITER ',')",
+                [str(source), str(temporary_path)],
+            )
+        temporary_path.replace(source)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
     return source
 
 

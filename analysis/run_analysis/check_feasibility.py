@@ -4,8 +4,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-import numpy as np
-import pandas as pd
+import duckdb
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -18,23 +17,60 @@ MAX_DEVIATION_DURATION = 1.5
 _POSITION_COLUMNS = ["timestamp", "drone", "x", "y", "z"]
 
 
-def _load_table(filename: str | Path, directory: Path) -> pd.DataFrame:
-    """Load a named Parquet or CSV table from a registry directory."""
+def _resolve_source(filename: str | Path, directory: Path) -> Path:
+    """Resolve a named Parquet or CSV input inside its registry directory."""
     source = directory / Path(filename).name
     if not source.exists():
         raise FileNotFoundError(source)
+    if source.suffix.lower() not in {".parquet", ".csv"}:
+        raise ValueError(f"Unsupported file type: {source.suffix}")
+    return source
+
+
+def _reader(source: Path) -> str:
+    """Return the DuckDB reader expression for a registry file."""
     if source.suffix.lower() == ".parquet":
-        return pd.read_parquet(source)
-    if source.suffix.lower() == ".csv":
-        return pd.read_csv(source)
-    raise ValueError(f"Unsupported file type: {source.suffix}")
+        return "read_parquet(?)"
+    return "read_csv_auto(?)"
 
 
-def _validate_position_columns(data: pd.DataFrame, label: str) -> None:
-    """Ensure a table contains the position columns required for comparison."""
-    missing = [column for column in _POSITION_COLUMNS if column not in data.columns]
+def _validate_position_columns(
+    connection: duckdb.DuckDBPyConnection,
+    reader: str,
+    source: Path,
+    label: str,
+) -> None:
+    """Ensure an input contains the position columns required for comparison."""
+    columns = [
+        row[0]
+        for row in connection.execute(
+            f"DESCRIBE SELECT * FROM {reader}", [str(source)]
+        ).fetchall()
+    ]
+    missing = [column for column in _POSITION_COLUMNS if column not in columns]
     if missing:
         raise ValueError(f"{label} is missing columns: {missing}")
+
+
+def _infeasible_result(
+    run_filename: str | Path,
+    trajectory_filename: str | Path,
+    reason: str,
+    drone: object | None = None,
+    infeasible_since: float | None = None,
+) -> dict[str, Any]:
+    """Build the established infeasibility result shape."""
+    result: dict[str, Any] = {
+        "result": "infeasible",
+        "run_file": Path(run_filename).name,
+        "trajectory_file": Path(trajectory_filename).name,
+        "reason": reason,
+    }
+    if drone is not None:
+        result["drone"] = drone
+    if infeasible_since is not None:
+        result["infeasible_since"] = infeasible_since
+    return result
 
 
 def check_feasibility(
@@ -47,67 +83,139 @@ def check_feasibility(
     ``MAX_POSITION_DEVIATION`` metres from its intended position for longer
     than ``MAX_DEVIATION_DURATION`` seconds continuously.
     """
-    run_data = _load_table(run_filename, _RUN_DIRECTORY)
-    trajectory_data = _load_table(trajectory_filename, _TRAJECTORY_DIRECTORY)
-    _validate_position_columns(run_data, "run data")
-    _validate_position_columns(trajectory_data, "trajectory data")
+    run_source = _resolve_source(run_filename, _RUN_DIRECTORY)
+    trajectory_source = _resolve_source(trajectory_filename, _TRAJECTORY_DIRECTORY)
+    run_reader = _reader(run_source)
+    trajectory_reader = _reader(trajectory_source)
 
-    run_data = run_data[_POSITION_COLUMNS].copy()
-    trajectory_data = trajectory_data[_POSITION_COLUMNS].copy()
-    run_data["timestamp"] = pd.to_numeric(run_data["timestamp"]).round(9)
-    trajectory_data["timestamp"] = pd.to_numeric(
-        trajectory_data["timestamp"]
-    ).round(9)
-    merged = run_data.merge(
-        trajectory_data,
-        on=["timestamp", "drone"],
-        how="outer",
-        suffixes=("_actual", "_intended"),
-        indicator=True,
-    )
-    if not (merged["_merge"] == "both").all():
-        return {
-            "result": "infeasible",
-            "run_file": Path(run_filename).name,
-            "trajectory_file": Path(trajectory_filename).name,
-            "reason": "Run and trajectory timestamps or drones do not match.",
-        }
+    with duckdb.connect() as connection:
+        _validate_position_columns(connection, run_reader, run_source, "run data")
+        _validate_position_columns(
+            connection,
+            trajectory_reader,
+            trajectory_source,
+            "trajectory data",
+        )
 
-    merged = merged.sort_values(["drone", "timestamp"])
-    actual = merged[["x_actual", "y_actual", "z_actual"]].to_numpy(dtype=float)
-    intended = merged[["x_intended", "y_intended", "z_intended"]].to_numpy(dtype=float)
-    merged["deviation"] = np.linalg.norm(actual - intended, axis=1)
-    merged["exceeds_limit"] = (
-        ~np.isfinite(merged["deviation"])
-        | (merged["deviation"] > MAX_POSITION_DEVIATION)
-    )
+        run_keys_sql = f"""
+            SELECT DISTINCT
+                ROUND(CAST(timestamp AS DOUBLE), 9) AS timestamp,
+                CAST(drone AS VARCHAR) AS drone_key
+            FROM {run_reader}
+        """
+        trajectory_keys_sql = f"""
+            SELECT DISTINCT
+                ROUND(CAST(timestamp AS DOUBLE), 9) AS timestamp,
+                CAST(drone AS VARCHAR) AS drone_key
+            FROM {trajectory_reader}
+        """
+        mismatch_row = connection.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM (
+                SELECT run_keys.timestamp, run_keys.drone_key
+                FROM ({run_keys_sql}) AS run_keys
+                FULL OUTER JOIN ({trajectory_keys_sql}) AS trajectory_keys
+                    ON run_keys.timestamp = trajectory_keys.timestamp
+                   AND run_keys.drone_key = trajectory_keys.drone_key
+                WHERE run_keys.timestamp IS NULL
+                   OR trajectory_keys.timestamp IS NULL
+            )
+            """,
+            [
+                str(run_source),
+                str(trajectory_source),
+            ],
+        ).fetchone()
+        mismatch = mismatch_row[0] if mismatch_row is not None else 0
+        if mismatch:
+            return _infeasible_result(
+                run_filename,
+                trajectory_filename,
+                "Run and trajectory timestamps or drones do not match.",
+            )
 
-    for _, drone_data in merged.groupby("drone", sort=False):
-        drone_data = drone_data.sort_values("timestamp")
-        exceeded = drone_data["exceeds_limit"].to_numpy(dtype=bool)
-        timestamps = drone_data["timestamp"].to_numpy(dtype=float)
-        start_time: float | None = None
-        for index, is_exceeded in enumerate(exceeded):
-            if is_exceeded and start_time is None:
-                start_time = timestamps[index]
-            elif not is_exceeded and start_time is not None:
-                if timestamps[index] - start_time >= MAX_DEVIATION_DURATION:
-                    return {
-                        "result": "infeasible",
-                        "run_file": Path(run_filename).name,
-                        "trajectory_file": Path(trajectory_filename).name,
-                        "reason": "A drone exceeded the deviation limit for too long.",
-                        "drone": drone_data.iloc[0]["drone"],
-                    }
-                start_time = None
-        if start_time is not None and timestamps[-1] - start_time >= MAX_DEVIATION_DURATION:
-            return {
-                "result": "infeasible",
-                "run_file": Path(run_filename).name,
-                "trajectory_file": Path(trajectory_filename).name,
-                "reason": "A drone exceeded the deviation limit for too long.",
-                "drone": drone_data.iloc[0]["drone"],
-            }
+        deviation = connection.execute(
+            f"""
+            WITH run_data AS (
+                SELECT
+                    ROUND(CAST(timestamp AS DOUBLE), 9) AS timestamp,
+                    CAST(drone AS VARCHAR) AS drone_key,
+                    drone,
+                    CAST(x AS DOUBLE) AS actual_x,
+                    CAST(y AS DOUBLE) AS actual_y,
+                    CAST(z AS DOUBLE) AS actual_z
+                FROM {run_reader}
+            ),
+            trajectory_data AS (
+                SELECT
+                    ROUND(CAST(timestamp AS DOUBLE), 9) AS timestamp,
+                    CAST(drone AS VARCHAR) AS drone_key,
+                    CAST(x AS DOUBLE) AS intended_x,
+                    CAST(y AS DOUBLE) AS intended_y,
+                    CAST(z AS DOUBLE) AS intended_z
+                FROM {trajectory_reader}
+            ),
+            deviations AS (
+                SELECT
+                    run_data.drone,
+                    run_data.drone_key,
+                    run_data.timestamp,
+                    SQRT(
+                        POW(actual_x - intended_x, 2)
+                        + POW(actual_y - intended_y, 2)
+                        + POW(actual_z - intended_z, 2)
+                    ) AS deviation
+                FROM run_data
+                INNER JOIN trajectory_data
+                    ON run_data.timestamp = trajectory_data.timestamp
+                   AND run_data.drone_key = trajectory_data.drone_key
+            ),
+            exceeded AS (
+                SELECT
+                    *,
+                    NOT isfinite(deviation)
+                        OR deviation > {MAX_POSITION_DEVIATION}
+                        AS exceeds_limit
+                FROM deviations
+            ),
+            marked AS (
+                SELECT
+                    *,
+                    SUM(
+                        CASE WHEN exceeds_limit THEN 0 ELSE 1 END
+                    ) OVER (
+                        PARTITION BY drone_key
+                        ORDER BY timestamp
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                    ) AS segment
+                FROM exceeded
+            )
+            SELECT
+                drone,
+                MIN(timestamp) AS start_time,
+                MAX(timestamp) - MIN(timestamp) AS duration
+            FROM marked
+            WHERE exceeds_limit
+            GROUP BY drone_key, drone, segment
+            HAVING MAX(timestamp) - MIN(timestamp) >= {MAX_DEVIATION_DURATION}
+            ORDER BY start_time
+            LIMIT 1
+            """,
+            [
+                str(run_source),
+                str(trajectory_source),
+            ],
+        ).fetchone()
+
+    if deviation is not None:
+        return _infeasible_result(
+            run_filename,
+            trajectory_filename,
+            "A drone exceeded the deviation limit for too long.",
+            deviation[0],
+            deviation[1],
+        )
 
     return {
         "result": "feasible",

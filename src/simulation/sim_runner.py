@@ -110,7 +110,73 @@ def _normalise_positions(
 	}
 
 
+def _failed_simulation_result(
+	drones: Sequence[Drone],
+	t_final: float,
+	error: Exception,
+) -> dict[str, Any]:
+	"""Build result metadata for a simulation that could not complete."""
+	try:
+		duration = float(t_final) if np.isfinite(t_final) and t_final >= 0 else 0.0
+	except (TypeError, ValueError):
+		duration = 0.0
+	return {
+		"drones": list(drones),
+		"outcome": "failed",
+		"error": f"{type(error).__name__}: {error}",
+		"duration": duration,
+		"n_steps": 0,
+		"promoted_leader": None,
+		"promotion_time": None,
+	}
+
+
 def run_simulation(
+	drones: Sequence[Drone],
+	initial_leader: Drone,
+	initial_positions: Mapping[Drone, Sequence[float]] | Sequence[Sequence[float]],
+	leader_path: Any,
+	leader_failure_time: float | None,
+	election_type: ElectionType = "random",
+	print_election: bool = False,
+	*,
+	formation_offsets: Mapping[Drone, Sequence[float]] | None = None,
+	route_aligned_formation: bool = True,
+	sim_rate: int = 100,
+	t_final: float = 10.0,
+	random_election_seed: int | None = None,
+	display: bool | str = "no",
+	save_data_filename: str | None = None,
+	print_path_filename: str | None = None,
+	save_data: bool = False,
+	print_path: bool = False,
+) -> dict[str, Any]:
+	"""Run a simulation and return failure metadata instead of raising errors."""
+	try:
+		return _run_simulation(
+			drones=drones,
+			initial_leader=initial_leader,
+			initial_positions=initial_positions,
+			leader_path=leader_path,
+			leader_failure_time=leader_failure_time,
+			election_type=election_type,
+			print_election=print_election,
+			formation_offsets=formation_offsets,
+			route_aligned_formation=route_aligned_formation,
+			sim_rate=sim_rate,
+			t_final=t_final,
+			random_election_seed=random_election_seed,
+			display=display,
+			save_data_filename=save_data_filename,
+			print_path_filename=print_path_filename,
+			save_data=save_data,
+			print_path=print_path,
+		)
+	except Exception as error:
+		return _failed_simulation_result(drones, t_final, error)
+
+
+def _run_simulation(
 	drones: Sequence[Drone],
 	initial_leader: Drone,
 	initial_positions: Mapping[Drone, Sequence[float]] | Sequence[Sequence[float]],
@@ -153,7 +219,7 @@ def run_simulation(
 		t_final: Simulation duration in seconds.
 		random_election_seed: Optional seed passed to the random election strategy.
 		save_data_filename: Optional Parquet filename inside ``results/data``.
-		print_path_filename: Optional CSV filename inside
+		print_path_filename: Optional Parquet filename inside
 			``results/data/trajectories``.
 		display: Use ``"yes"`` to show the 3D plot and animation after the
 			simulation, or ``"no"`` to return results without opening a window.
@@ -165,7 +231,7 @@ def run_simulation(
 
 	Returns:
 		A dictionary containing time, positions, rotations, wind, leader history,
-		failure history, promotion time, and the ordered drone identifiers.
+		failure history, promotion time, and run-result metadata.
 
 	Raises:
 		ValueError: If the inputs are inconsistent or the election returns an
@@ -401,6 +467,13 @@ def run_simulation(
 	results = {
 		"drones": drones,
 		"time": time_history,
+		"outcome": "done",
+		"error": "",
+		"duration": t_final,
+		"n_steps": num_steps,
+		"promoted_leader": (
+			active_leader if promotion_time is not None else None
+		),
 		"positions": position_history,
 		"travel_distances": travel_distance_history,
 		"rotations": rotation_history,

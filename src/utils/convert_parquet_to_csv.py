@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 
-_DATA_DIRECTORY = Path(__file__).resolve().parents[1] / "results" / "data"
+_DATA_DIRECTORY = Path(__file__).resolve().parents[2] / "results" / "data"
 
 
 def convert_parquet_to_csv(

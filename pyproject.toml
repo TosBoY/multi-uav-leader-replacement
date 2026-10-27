@@ -13,6 +13,7 @@ dependencies = [
     "rotorpy",
     "pandas",
     "pyarrow",
+    "duckdb",
 ]
 
 [tool.setuptools.packages.find]

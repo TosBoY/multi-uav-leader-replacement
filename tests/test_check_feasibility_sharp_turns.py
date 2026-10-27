@@ -62,16 +62,16 @@ class TestSharpTurnFeasibility(unittest.TestCase):
             save_data=True,
             save_data_filename="nonfail/sharp_turn_run.parquet",
             print_path=True,
-            print_path_filename="sharp_turn_trajectory.csv",
+            print_path_filename="sharp_turn_trajectory.parquet",
         )
 
         result = check_feasibility(
             "sharp_turn_run.parquet",
-            "sharp_turn_trajectory.csv",
+            "sharp_turn_trajectory.parquet",
         )
         print(f"sharp-turn feasibility result: {result}")
         self.assertEqual(result["run_file"], "sharp_turn_run.parquet")
-        self.assertEqual(result["trajectory_file"], "sharp_turn_trajectory.csv")
+        self.assertEqual(result["trajectory_file"], "sharp_turn_trajectory.parquet")
         self.assertIn(result["result"], {"feasible", "infeasible"})
 
 
