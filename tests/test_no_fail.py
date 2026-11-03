@@ -32,7 +32,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             velocity=leader_speed,
             time=simulation_time,
             initial_heading=leader_heading,
-            print_waypoints=True,
+            print_waypoints=False,
             seed=4,
         )
 
@@ -48,14 +48,17 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             t_final=simulation_time,
             display=False,
             save_data=False,
+            print_to_console=False,
         )
 
+        """
         print("run_simulation results:")
         for key, value in results.items():
             if isinstance(value, np.ndarray):
                 print(f"{key}: ndarray shape={value.shape}")
             else:
                 print(f"{key}: {value}")
+        """
 
         self.assertIsNone(results["promotion_time"])
         self.assertEqual(results["leader_history"][0], 0)

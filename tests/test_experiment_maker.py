@@ -16,7 +16,6 @@ class TestExperimentMaker(unittest.TestCase):
             formation_type="leader_follower",
             shape="line_x",
             spread=1.0,
-            dimension=2,
             plane="xz",
             path_type="line",
             velocity=1.0,
@@ -26,8 +25,8 @@ class TestExperimentMaker(unittest.TestCase):
             election_type="minimum_travel",
             sim_rate=100,
             display=False,
-            save_data=True,
-            print_path=True,
+            save_data=False,
+            print_path=False,
         )
 
         self.assertEqual(results["promotion_time"], 5.0)

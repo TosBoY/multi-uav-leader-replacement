@@ -255,7 +255,4 @@ def ensure_status_column(output_path: str | Path = DEFAULT_RUNS_FILE) -> Path:
 
 
 if __name__ == "__main__":
-    if DEFAULT_RUNS_FILE.exists():
-        ensure_status_column()
-    else:
-        make_runs_csv()
+    make_runs_csv()

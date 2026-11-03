@@ -26,7 +26,6 @@ FORMATION_COLUMNS = [
     "number_of_drone",
     "shape",
     "spread",
-    "dimension",
     "plane",
     "leader_index",
     "leader_position_x",
@@ -39,11 +38,12 @@ FORMATION_SHAPES = (
     "line_z",
     "arrow",
     "circle",
+    "sphere",
     "grid",
 )
 FORMATION_PLANES = ("xy", "xz", "yz")
 DEFAULT_NUMBER_OF_DRONES = tuple(range(5, 9))
-DEFAULT_SPREADS = (1.0, 1.5, 2.0, 2.5, 3.0)
+DEFAULT_SPREADS = (1.0, 2.0, 3.0)
 DEFAULT_LEADER_INDEX = 0
 DEFAULT_LEADER_POSITION = (0.0, 0.0, 1.0)
 DEFAULT_FORMATIONS_FILE = setup_path("formations.csv")
@@ -80,25 +80,24 @@ def generate_formations(
     formation_id = 1
     for count in number_of_drones:
         for shape in shapes:
-            dimensions = (2, 3) if shape == "circle" else (2,)
             for spread in spreads:
-                for dimension in dimensions:
-                    for plane in planes:
-                        rows.append(
-                            {
-                                "formation_id": formation_id,
-                                "number_of_drone": count,
-                                "shape": shape,
-                                "spread": spread,
-                                "dimension": dimension,
-                                "plane": plane,
-                                "leader_index": DEFAULT_LEADER_INDEX,
-                                "leader_position_x": DEFAULT_LEADER_POSITION[0],
-                                "leader_position_y": DEFAULT_LEADER_POSITION[1],
-                                "leader_position_z": DEFAULT_LEADER_POSITION[2],
-                            }
-                        )
-                        formation_id += 1
+                formation_planes = (None,) if shape == "sphere" else planes
+                for plane in formation_planes:
+                    formation_plane = "" if shape == "sphere" else plane
+                    rows.append(
+                        {
+                            "formation_id": formation_id,
+                            "number_of_drone": count,
+                            "shape": shape,
+                            "spread": spread,
+                            "plane": formation_plane,
+                            "leader_index": DEFAULT_LEADER_INDEX,
+                            "leader_position_x": DEFAULT_LEADER_POSITION[0],
+                            "leader_position_y": DEFAULT_LEADER_POSITION[1],
+                            "leader_position_z": DEFAULT_LEADER_POSITION[2],
+                        }
+                    )
+                    formation_id += 1
     return rows
 
 
@@ -131,6 +130,8 @@ def edit_formation(
         raise ValueError("Updates contain an unknown or non-editable field.")
     if "shape" in updates:
         validate_choice(str(updates["shape"]), FORMATION_SHAPES, "shape")
+        if updates["shape"] == "sphere":
+            updates["plane"] = ""
     if "plane" in updates:
         validate_choice(str(updates["plane"]), FORMATION_PLANES, "plane")
 

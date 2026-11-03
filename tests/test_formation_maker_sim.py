@@ -14,16 +14,15 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
 
     def test_path_maker_to_sim_runner(self):
         """Promote a random follower after the initial leader fails."""
-        drones = [0, 1, 2, 3, 4]
+        drones = [0, 1, 2, 3, 4, 5, 6]
         initial_leader = 0
         leader_start = np.array([0, 0.0, 1.0])
         initial_positions = make_formation(
             number_of_drones=len(drones),
             formation_type="leader_follower",
-            shape="arrow",
+            shape="sphere",
             spread=1.0,
-            dimension=3,
-            plane="xz",
+            plane="yz",
             leader_index=initial_leader,
             leader_position=leader_start,
         )
@@ -32,7 +31,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
         simulation_time = 10.0
         leader_failure_time = simulation_time / 2.0
         leader_path = make_leader_path(
-            path_type="random",
+            path_type="line",
             first_waypoint=initial_positions[initial_leader],
             velocity=leader_speed,
             time=simulation_time,

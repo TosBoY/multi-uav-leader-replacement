@@ -25,7 +25,6 @@ class TestSimRunnerSavedData(unittest.TestCase):
             formation_type="leader_follower",
             shape="arrow",
             spread=1.0,
-            dimension=2,
             plane="xz",
             leader_index=self.initial_leader,
             leader_position=np.array([0.0, 0.0, 1.0]),

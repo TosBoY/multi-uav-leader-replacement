@@ -150,6 +150,7 @@ def run_simulation(
 	print_path_filename: str | None = None,
 	save_data: bool = False,
 	print_path: bool = False,
+	print_to_console: bool = False,
 ) -> dict[str, Any]:
 	"""Run a simulation and return failure metadata instead of raising errors."""
 	try:
@@ -171,6 +172,7 @@ def run_simulation(
 			print_path_filename=print_path_filename,
 			save_data=save_data,
 			print_path=print_path,
+				print_to_console=print_to_console,
 		)
 	except Exception as error:
 		return _failed_simulation_result(drones, t_final, error)
@@ -195,6 +197,7 @@ def _run_simulation(
 	print_path_filename: str | None = None,
 	save_data: bool = False,
 	print_path: bool = False,
+	print_to_console: bool = False,
 ) -> dict[str, Any]:
 	"""Run a configurable RotorPy leader/follower simulation.
 
@@ -263,6 +266,9 @@ def _run_simulation(
 		raise TypeError("save_data must be a boolean.")
 	if not isinstance(print_path, bool):
 		raise TypeError("print_path must be a boolean.")
+	if not isinstance(print_to_console, bool):
+		raise TypeError("print_to_console must be a boolean.")
+	console_print = print if print_to_console else lambda *args, **kwargs: None
 
 	positions = _normalise_positions(drones, initial_positions)
 	if any(position.shape != (3,) for position in positions.values()):
@@ -310,12 +316,12 @@ def _run_simulation(
 		controllers[drone] = SE3Control(quad_params)
 		states[drone] = state
 
-	print(
+	console_print(
 		f"Created {len(drones)} UAVs. "
 		f"UAV {initial_leader} is the initial leader."
 	)
 	if leader_failure_time is not None:
-		print(
+		console_print(
 			f"Leader failure scheduled at t = {leader_failure_time:.2f} s."
 		)
 
@@ -381,7 +387,7 @@ def _run_simulation(
 				election_type=election_type,
 				failed_drone=failed_leader,
 				rng=election_rng,
-				print_election=print_election,
+				print_election=print_election and print_to_console,
 				travel_distances=current_travel_distances,
 			)
 			if promoted_leader not in active_drones:
@@ -393,7 +399,7 @@ def _run_simulation(
 			active_drones.insert(0, active_leader)
 			offsets[active_leader] = np.zeros(3)
 			promotion_time = time
-			print(
+			console_print(
 				f"UAV {failed_leader} failed at t = {time:.2f} s. "
 				f"UAV {active_leader} promoted to leader."
 			)
@@ -483,20 +489,20 @@ def _run_simulation(
 		"promotion_time": promotion_time,
 	}
 
-	print("Simulation finished.")
+	console_print("Simulation finished.")
 	for drone in drones:
 		index = drone_indices[drone]
-		print(
+		console_print(
 			f"UAV {drone}: start {position_history[0, index]} -> "
 			f"end {position_history[-1, index]}"
 		)
-	print(f"Time steps: {len(time_history)}")
+	console_print(f"Time steps: {len(time_history)}")
 	if save_data:
 		saved_path = save_simulation_data(
 			results,
 			output_filename=save_data_filename,
 		)
-		print(f"Simulation data saved to {saved_path}")
+		console_print(f"Simulation data saved to {saved_path}")
 	if print_path:
 		path_data_path = save_print_path(
 			intended_position_history,
@@ -504,10 +510,10 @@ def _run_simulation(
 			drones,
 			output_filename=print_path_filename,
 		)
-		print(f"Intended path data saved to {path_data_path}")
+		console_print(f"Intended path data saved to {path_data_path}")
 
 	if show_display:
-		print("Opening leader-promotion animation...")
+		console_print("Opening leader-promotion animation...")
 		display_simulation(results)
 
 	return results

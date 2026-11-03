@@ -62,6 +62,8 @@ def _infeasible_result(
     """Build the established infeasibility result shape."""
     result: dict[str, Any] = {
         "result": "infeasible",
+        "MAX_POSITION_DEVIATION": MAX_POSITION_DEVIATION,
+        "MAX_DEVIATION_DURATION": MAX_DEVIATION_DURATION,
         "run_file": Path(run_filename).name,
         "trajectory_file": Path(trajectory_filename).name,
         "reason": reason,
@@ -219,6 +221,8 @@ def check_feasibility(
 
     return {
         "result": "feasible",
+        "MAX_POSITION_DEVIATION": MAX_POSITION_DEVIATION,
+        "MAX_DEVIATION_DURATION": MAX_DEVIATION_DURATION,
         "run_file": Path(run_filename).name,
         "trajectory_file": Path(trajectory_filename).name,
     }

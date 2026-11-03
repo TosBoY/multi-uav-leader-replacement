@@ -13,6 +13,7 @@ FormationShape = Literal[
     "line_z",
     "arrow",
     "circle",
+    "sphere",
     "grid",
 ]
 FormationPlane = Literal["xy", "xz", "yz"]
@@ -21,7 +22,6 @@ FormationPlane = Literal["xy", "xz", "yz"]
 def _validate_inputs(
     number_of_drones: int,
     spread: float,
-    dimension: int,
     plane: FormationPlane,
     leader_index: int,
     leader_position: Sequence[float] | np.ndarray,
@@ -35,9 +35,6 @@ def _validate_inputs(
 
     if not np.isfinite(spread) or spread <= 0:
         raise ValueError("spread must be finite and greater than zero.")
-
-    if dimension not in {2, 3}:
-        raise ValueError("dimension must be either 2 or 3.")
 
     if plane not in {"xy", "xz", "yz"}:
         raise ValueError('plane must be "xy", "xz", or "yz".')
@@ -97,9 +94,8 @@ def _line_offsets(
 def _circle_offsets(
     number_of_drones: int,
     spread: float,
-    dimension: int,
 ) -> list[np.ndarray]:
-    """Create a leader-centered circle or sphere of follower offsets."""
+    """Create a leader-centered circle of follower offsets."""
     if number_of_drones == 1:
         return [np.zeros(3)]
 
@@ -108,31 +104,38 @@ def _circle_offsets(
     golden_angle = np.pi * (3.0 - np.sqrt(5.0))
 
     for index in range(follower_count):
-        if dimension == 2:
-            angle = 2.0 * np.pi * index / follower_count
-            offset = np.array(
-                [
-                    spread * np.cos(angle),
-                    spread * np.sin(angle),
-                    0.0,
-                ]
-            )
-        else:
-            # Use the Fibonacci sphere algorithm to evenly distribute points on a sphere.
-            angle = golden_angle * index
-            vertical = 1.0 - 2.0 * (index + 0.5) / follower_count
-            radius = np.sqrt(max(0.0, 1.0 - vertical**2))
-
-            offset = spread * np.array(
-                [
-                    radius * np.cos(angle),
-                    radius * np.sin(angle),
-                    vertical,
-                ]
-            )
+        angle = 2.0 * np.pi * index / follower_count
+        offset = np.array(
+            [
+                spread * np.cos(angle),
+                spread * np.sin(angle),
+                0.0,
+            ]
+        )
 
         offsets.append(offset)
 
+    return offsets
+
+
+def _sphere_offsets(number_of_drones: int, spread: float) -> list[np.ndarray]:
+    """Create a leader-centered sphere using Fibonacci-sphere points."""
+    if number_of_drones == 1:
+        return [np.zeros(3)]
+
+    offsets = [np.zeros(3)]
+    follower_count = number_of_drones - 1
+    golden_angle = np.pi * (3.0 - np.sqrt(5.0))
+    for index in range(follower_count):
+        angle = golden_angle * index
+        vertical = 1.0 - 2.0 * (index + 0.5) / follower_count
+        radius = np.sqrt(max(0.0, 1.0 - vertical**2))
+        offsets.append(
+            spread
+            * np.array(
+                [radius * np.cos(angle), radius * np.sin(angle), vertical]
+            )
+        )
     return offsets
 
 
@@ -169,7 +172,6 @@ def make_formation(
     formation_type: FormationType = "leader_follower",
     shape: FormationShape = "arrow",
     spread: float = 1.0,
-    dimension: int = 2,
     plane: FormationPlane = "xy",
     leader_index: int = 0,
     leader_position: Sequence[float] | np.ndarray = (0.0, 0.0, 1.0),
@@ -180,9 +182,8 @@ def make_formation(
         number_of_drones: Total number of drones, including the leader.
         formation_type: Formation behavior. Currently ``"leader_follower"``.
         shape: ``"line_x"``, ``"line_y"``, ``"line_z"``,
-            ``"arrow"``, ``"circle"``, or ``"grid"``.
+            ``"arrow"``, ``"circle"``, ``"sphere"``, or ``"grid"``.
         spread: Distance between neighboring formation elements in meters.
-        dimension: Arrange the formation in 2D or 3D.
         plane: For 2D formations, determines the two world axes used
             by ``arrow``, ``circle``, and ``grid``.
         leader_index: Drone identifier to place at the formation origin.
@@ -194,7 +195,6 @@ def make_formation(
     position = _validate_inputs(
         number_of_drones,
         spread,
-        dimension,
         plane,
         leader_index,
         leader_position,
@@ -222,12 +222,12 @@ def make_formation(
         apply_plane = True
 
     elif shape == "circle":
-        offsets = _circle_offsets(
-            number_of_drones,
-            spread,
-            dimension,
-        )
+        offsets = _circle_offsets(number_of_drones, spread)
         apply_plane = True
+
+    elif shape == "sphere":
+        offsets = _sphere_offsets(number_of_drones, spread)
+        apply_plane = False
 
     elif shape == "grid":
         offsets = _grid_offsets(number_of_drones, spread)
@@ -236,7 +236,7 @@ def make_formation(
     else:
         raise ValueError(
             'shape must be "line_x", "line_y", "line_z", '
-            '"arrow", "circle", or "grid".'
+            '"arrow", "circle", "sphere", or "grid".'
         )
 
     # Move the formation so that the selected leader is at the origin.
@@ -244,7 +244,7 @@ def make_formation(
     offsets = [offset - leader_offset for offset in offsets]
 
     # Only apply the plane constraint to formations that use a 2D plane.
-    if dimension == 2 and apply_plane:
+    if apply_plane:
         if plane == "xy":
             offsets = [
                 np.array([offset[0], offset[1], 0.0])

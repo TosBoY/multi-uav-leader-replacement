@@ -26,7 +26,6 @@ class TestSharpTurnFeasibility(unittest.TestCase):
             formation_type="leader_follower",
             shape="arrow",
             spread=1.0,
-            dimension=2,
             plane="xy",
             leader_index=initial_leader,
             leader_position=leader_start,
