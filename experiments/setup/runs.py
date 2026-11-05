@@ -30,7 +30,7 @@ RUN_COLUMNS = [
     "election_type",
     "status",
 ]
-ELECTION_TYPES = ("closest", "minimum_travel")
+ELECTION_TYPES = ("closest", "minimum_travel", "smallest_id", "central")
 RUN_STATUSES = ("planned", "running", "done", "failed", "infeasible", "cancelled")
 FAIL_TIMES = tuple(2.5 + 0.5 * index for index in range(11))
 DEFAULT_PATHS_FILE = setup_path("paths.csv")
@@ -74,7 +74,9 @@ run_rows AS (
         1 AS row_order
     FROM combinations
     CROSS JOIN (SELECT range / 2.0 AS fail_time FROM range(5, 16)) AS fail_times
-    CROSS JOIN (VALUES ('closest'), ('minimum_travel')) AS election_types(election_type)
+    CROSS JOIN (
+        VALUES ('closest'), ('minimum_travel'), ('smallest_id'), ('central')
+    ) AS election_types(election_type)
 )
 SELECT
     ROW_NUMBER() OVER (

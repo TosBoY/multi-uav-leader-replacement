@@ -4,14 +4,23 @@ from collections.abc import Mapping, Sequence
 import random
 from typing import Literal, TypeVar
 
-from election.centroid_election import elect_closest_leader
+from election.central_election import elect_central_leader
+from election.closest_to_leader_election import elect_closest_leader
 from election.furthest_election import elect_furthest_leader
 from election.minimum_travel_election import elect_minimum_travel_leader
 from election.random_election import elect_random_leader
+from election.smallest_id_election import elect_smallest_id_leader
 
 
 Drone = TypeVar("Drone")
-ElectionType = Literal["random", "closest", "furthest", "minimum_travel"]
+ElectionType = Literal[
+    "random",
+    "closest",
+    "furthest",
+    "minimum_travel",
+    "smallest_id",
+    "central",
+]
 
 
 def elect_new_leader(
@@ -79,10 +88,22 @@ def elect_new_leader(
             old_leader=failed_drone,
             print_election=print_election,
         )
+    elif election_type == "smallest_id":
+        elected_drone = elect_smallest_id_leader(
+            drones,
+            old_leader=failed_drone,
+        )
+    elif election_type == "central":
+        elected_drone = elect_central_leader(
+            drones,
+            positions,
+            current_leader=failed_drone,
+            print_election=print_election,
+        )
     else:
         raise ValueError(
             'election_type must be "random", "closest", "furthest", '
-            'or "minimum_travel".'
+            '"minimum_travel", "smallest_id", or "central".'
         )
 
     if elected_drone not in active_drones:
