@@ -1,12 +1,11 @@
 """Create and append feasibility-analysis records."""
 
 from pathlib import Path
-import csv
 
 try:
-    from experiments.setup.common import REGISTRY_DIRECTORY
+    from experiments.setup.common import DATABASE_PATH, connect_database
 except ModuleNotFoundError:
-    from common import REGISTRY_DIRECTORY
+    from common import DATABASE_PATH, connect_database
 
 
 FEASIBLE_COLUMNS = [
@@ -19,18 +18,30 @@ FEASIBLE_COLUMNS = [
     "drone",
     "infeasible_since",
 ]
-DEFAULT_FEASIBLE_FILE = REGISTRY_DIRECTORY / "feasible.csv"
+DEFAULT_DATABASE = DATABASE_PATH
 
 
-def make_feasible_csv(
-    output_path: str | Path = DEFAULT_FEASIBLE_FILE,
+def make_feasible_table(
+    output_path: str | Path = DEFAULT_DATABASE,
 ) -> Path:
-    """Create an empty feasibility registry with its required header."""
-    destination = Path(output_path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("w", newline="", encoding="utf-8") as csv_file:
-        csv.writer(csv_file).writerow(FEASIBLE_COLUMNS)
-    return destination
+    """Create or replace the empty feasibility registry table."""
+    with connect_database() as connection:
+        connection.execute("DROP TABLE IF EXISTS registry.feasible")
+        connection.execute(
+            """
+            CREATE TABLE registry.feasible (
+                run_id BIGINT,
+                "MAX_POSITION_DEVIATION" DOUBLE,
+                "MAX_DEVIATION_DURATION" DOUBLE,
+                run_file VARCHAR,
+                trajectory_file VARCHAR,
+                reason VARCHAR,
+                drone VARCHAR,
+                infeasible_since DOUBLE
+            )
+            """
+        )
+    return Path(output_path)
 
 
 def data_input(
@@ -42,7 +53,7 @@ def data_input(
     reason: str = "",
     drone: int | str | None = None,
     infeasible_since: float | None = None,
-    output_path: str | Path = DEFAULT_FEASIBLE_FILE,
+    output_path: str | Path = DEFAULT_DATABASE,
 ) -> Path:
     """Append one feasibility result to the registry table."""
     if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1:
@@ -52,24 +63,36 @@ def data_input(
     if max_deviation_duration < 0:
         raise ValueError("max_deviation_duration must be non-negative.")
 
-    destination = Path(output_path)
-    if not destination.exists() or destination.stat().st_size == 0:
-        make_feasible_csv(destination)
-
-    row = {
-        "run_id": run_id,
-        "MAX_POSITION_DEVIATION": max_position_deviation,
-        "MAX_DEVIATION_DURATION": max_deviation_duration,
-        "run_file": run_file,
-        "trajectory_file": trajectory_file,
-        "reason": reason,
-        "drone": "" if drone is None else drone,
-        "infeasible_since": "" if infeasible_since is None else infeasible_since,
-    }
-    with destination.open("a", newline="", encoding="utf-8") as csv_file:
-        csv.DictWriter(csv_file, fieldnames=FEASIBLE_COLUMNS).writerow(row)
-    return destination
+    with connect_database() as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS registry.feasible (
+                run_id BIGINT,
+                "MAX_POSITION_DEVIATION" DOUBLE,
+                "MAX_DEVIATION_DURATION" DOUBLE,
+                run_file VARCHAR,
+                trajectory_file VARCHAR,
+                reason VARCHAR,
+                drone VARCHAR,
+                infeasible_since DOUBLE
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO registry.feasible VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                run_id, max_position_deviation, max_deviation_duration, run_file,
+                trajectory_file, reason, None if drone is None else str(drone),
+                infeasible_since,
+            ],
+        )
+    return Path(output_path)
 
 
 if __name__ == "__main__":
-    make_feasible_csv()
+    make_feasible_table()
+
+
+make_feasible_csv = make_feasible_table

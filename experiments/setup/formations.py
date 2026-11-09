@@ -5,19 +5,15 @@ from pathlib import Path
 
 try:
     from experiments.setup.common import (
-        read_csv_rows,
-        setup_path,
+        DATABASE_PATH,
+        connect_database,
         validate_choice,
-        validate_columns,
-        write_csv_rows,
     )
 except ModuleNotFoundError:
     from common import (
-        read_csv_rows,
-        setup_path,
+        DATABASE_PATH,
+        connect_database,
         validate_choice,
-        validate_columns,
-        write_csv_rows,
     )
 
 
@@ -46,7 +42,7 @@ DEFAULT_NUMBER_OF_DRONES = tuple(range(5, 9))
 DEFAULT_SPREADS = (1.0, 2.0, 3.0)
 DEFAULT_LEADER_INDEX = 0
 DEFAULT_LEADER_POSITION = (0.0, 0.0, 1.0)
-DEFAULT_FORMATIONS_FILE = setup_path("formations.csv")
+FORMATIONS_TABLE = "registry.formations"
 
 
 def generate_formations(
@@ -101,29 +97,46 @@ def generate_formations(
     return rows
 
 
-def make_formations_csv(
-    output_path: str | Path = DEFAULT_FORMATIONS_FILE,
+def make_formations_table(
+    output_path: str | Path = DATABASE_PATH,
     number_of_drones: Sequence[int] = DEFAULT_NUMBER_OF_DRONES,
     shapes: Sequence[str] = FORMATION_SHAPES,
     spreads: Sequence[float] = DEFAULT_SPREADS,
     planes: Sequence[str] = FORMATION_PLANES,
 ) -> Path:
-    """Generate and write the formations setup CSV."""
-    return write_csv_rows(
-        output_path,
-        FORMATION_COLUMNS,
-        generate_formations(number_of_drones, shapes, spreads, planes),
-    )
+    """Generate and replace the formations registry table."""
+    rows = generate_formations(number_of_drones, shapes, spreads, planes)
+    with connect_database() as connection:
+        connection.execute("DROP TABLE IF EXISTS registry.formations")
+        connection.execute(
+            """
+            CREATE TABLE registry.formations (
+                formation_id BIGINT,
+                number_of_drone BIGINT,
+                shape VARCHAR,
+                spread DOUBLE,
+                plane VARCHAR,
+                leader_index BIGINT,
+                leader_position_x DOUBLE,
+                leader_position_y DOUBLE,
+                leader_position_z DOUBLE
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO registry.formations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [tuple(row[column] if row[column] != "" else None for column in FORMATION_COLUMNS)
+             for row in rows],
+        )
+    return Path(output_path)
 
 
 def edit_formation(
     formation_id: int,
-    output_path: str | Path = DEFAULT_FORMATIONS_FILE,
+    output_path: str | Path = DATABASE_PATH,
     **updates: object,
 ) -> Path:
-    """Edit one formation row and rewrite the formations CSV."""
-    fieldnames, rows = read_csv_rows(output_path)
-    validate_columns(fieldnames, FORMATION_COLUMNS)
+    """Edit one formation row in the formations registry table."""
     if not isinstance(formation_id, int) or isinstance(formation_id, bool):
         raise TypeError("formation_id must be an integer.")
     if any(field not in FORMATION_COLUMNS[1:] for field in updates):
@@ -135,15 +148,22 @@ def edit_formation(
     if "plane" in updates:
         validate_choice(str(updates["plane"]), FORMATION_PLANES, "plane")
 
-    for row in rows:
-        if int(row["formation_id"]) == formation_id:
-            row.update({field: str(value) for field, value in updates.items()})
-            break
-    else:
-        raise ValueError(f"No formation with formation_id={formation_id} exists.")
-
-    return write_csv_rows(output_path, FORMATION_COLUMNS, rows)
+    with connect_database() as connection:
+        if connection.execute(
+            "SELECT 1 FROM registry.formations WHERE formation_id = ?",
+            [formation_id],
+        ).fetchone() is None:
+            raise ValueError(f"No formation with formation_id={formation_id} exists.")
+        for field, value in updates.items():
+            connection.execute(
+                f'UPDATE registry.formations SET "{field}" = ? WHERE formation_id = ?',
+                [value, formation_id],
+            )
+    return Path(output_path)
 
 
 if __name__ == "__main__":
-    make_formations_csv()
+    make_formations_table()
+
+
+make_formations_csv = make_formations_table

@@ -5,13 +5,21 @@ import csv
 from pathlib import Path
 from typing import Any
 
+import duckdb
 
-REGISTRY_DIRECTORY = Path(__file__).resolve().parents[2] / "results" / "registry"
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATABASE_PATH = PROJECT_ROOT / "results" / "experiments.duckdb"
+REGISTRY_SCHEMA = "registry"
 
 
-def setup_path(filename: str) -> Path:
-    """Return a path inside the project experiment registry directory."""
-    return REGISTRY_DIRECTORY / filename
+def connect_database() -> duckdb.DuckDBPyConnection:
+    """Open the persistent experiment database and ensure its schemas exist."""
+    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    connection = duckdb.connect(str(DATABASE_PATH))
+    connection.execute("CREATE SCHEMA IF NOT EXISTS registry")
+    connection.execute("CREATE SCHEMA IF NOT EXISTS analysis")
+    return connection
 
 
 def read_csv_rows(path: str | Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -42,10 +50,10 @@ def validate_columns(
     fieldnames: Sequence[str],
     expected: Sequence[str],
 ) -> None:
-    """Raise an error when a setup CSV has the wrong columns."""
+    """Raise an error when a table or CSV has the wrong columns."""
     if list(fieldnames) != list(expected):
         raise ValueError(
-            f"CSV columns must be {list(expected)}, got {list(fieldnames)}."
+            f"Columns must be {list(expected)}, got {list(fieldnames)}."
         )
 
 

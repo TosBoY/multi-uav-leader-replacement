@@ -5,14 +5,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-import duckdb
-
 try:
     from analysis.run_analysis.check_feasibility import check_feasibility
-    from experiments.setup.common import REGISTRY_DIRECTORY
+    from experiments.setup.common import connect_database
     from experiments.setup.feasible import data_input as feasible_data_input
     from experiments.setup.runs import edit_run_status
     from experiments.setup.runs_result import data_input as result_data_input
+    from experiments.experiments_manager.parquet_merger import merge_parquet_files
     from simulation.experiment_maker import make_experiment
 except ModuleNotFoundError:
     from pathlib import Path as _Path
@@ -20,17 +19,12 @@ except ModuleNotFoundError:
 
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
     from analysis.run_analysis.check_feasibility import check_feasibility
-    from experiments.setup.common import REGISTRY_DIRECTORY
+    from experiments.setup.common import connect_database
     from experiments.setup.feasible import data_input as feasible_data_input
     from experiments.setup.runs import edit_run_status
     from experiments.setup.runs_result import data_input as result_data_input
+    from experiments.experiments_manager.parquet_merger import merge_parquet_files
     from simulation.experiment_maker import make_experiment
-
-
-_REGISTRY_DIRECTORY = REGISTRY_DIRECTORY
-_RUNS_FILE = _REGISTRY_DIRECTORY / "runs.csv"
-_FORMATIONS_FILE = _REGISTRY_DIRECTORY / "formations.csv"
-_PATHS_FILE = _REGISTRY_DIRECTORY / "paths.csv"
 
 
 def _range_filter(
@@ -67,7 +61,7 @@ def _load_runs(
     shape_range: Sequence[str] | None,
 ) -> list[dict[str, Any]]:
     """Load filtered run configurations in ascending run-ID order."""
-    parameters: list[Any] = [str(_RUNS_FILE), str(_FORMATIONS_FILE), str(_PATHS_FILE)]
+    parameters: list[Any] = []
     filters = "".join(
         (
             _range_filter(run_id_range, "r.runs_id", parameters),
@@ -96,24 +90,19 @@ def _load_runs(
             p.time,
             p.seed,
             p.initial_heading
-        FROM read_csv_auto(?) AS r
-        INNER JOIN read_csv_auto(?) AS f
+        FROM registry.runs AS r
+        INNER JOIN registry.formations AS f
             ON r.formation_id = f.formation_id
-        INNER JOIN read_csv_auto(?) AS p
+        INNER JOIN registry.paths AS p
             ON r.path_id = p.path_id
         WHERE TRUE
         {filters}
         ORDER BY r.runs_id
     """
-    with duckdb.connect() as connection:
+    with connect_database() as connection:
         result = connection.execute(query, parameters)
         columns = [description[0] for description in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
-
-
-def _relative_data_file(run_id: int, failure_enabled: bool) -> str:
-    category = "fail" if failure_enabled else "nonfail"
-    return f"results/data/{category}/{run_id}.parquet"
 
 
 def _record_result(
@@ -121,9 +110,8 @@ def _record_result(
     result: dict[str, Any],
     started_at: datetime,
     finished_at: datetime,
-    data_file: str,
 ) -> None:
-    """Append simulation metadata to runs_result.csv."""
+    """Append simulation metadata to the runs-result registry table."""
     result_data_input(
         run_id=run_id,
         outcome=result["outcome"],
@@ -131,7 +119,6 @@ def _record_result(
         started_at=started_at,
         finished_at=finished_at,
         duration=float(result.get("duration", 0.0)),
-        data_file=data_file,
         n_steps=int(result.get("n_steps", 0)),
         promoted_leader=result.get("promoted_leader"),
         promotion_time=result.get("promotion_time"),
@@ -142,7 +129,6 @@ def _record_failed_exception(
     run_id: int,
     error: Exception,
     started_at: datetime,
-    data_file: str,
 ) -> None:
     finished_at = datetime.now()
     result_data_input(
@@ -152,7 +138,6 @@ def _record_failed_exception(
         started_at=started_at,
         finished_at=finished_at,
         duration=0.0,
-        data_file=data_file,
         n_steps=0,
     )
     edit_run_status(run_id, "failed")
@@ -170,6 +155,22 @@ def run_experiments(
     """
     runs = _load_runs(run_id_range, number_of_drone_range, shape_range)
     recorded_results: list[dict[str, Any]] = []
+    fail_run_ids: list[int] = []
+    nonfail_run_ids: list[int] = []
+    data_root = Path(__file__).resolve().parents[2] / "results" / "data"
+
+    def merge_fail_data() -> None:
+        """Merge and clear the pending failed-run batch."""
+        if fail_run_ids:
+            merge_parquet_files(data_root / "fail", fail_run_ids)
+            fail_run_ids.clear()
+
+    def merge_nonfail_data() -> None:
+        """Merge and clear the pending non-failed-run batch."""
+        if nonfail_run_ids:
+            merge_parquet_files(data_root / "nonfail", nonfail_run_ids)
+            merge_parquet_files(data_root / "trajectories", nonfail_run_ids)
+            nonfail_run_ids.clear()
 
     for run in runs:
         run_id = int(run["runs_id"])
@@ -180,7 +181,6 @@ def run_experiments(
             continue
 
         failure_enabled = bool(run["leader_failure_enabled"])
-        data_file = _relative_data_file(run_id, failure_enabled)
         trajectory_file = f"results/data/trajectories/{run_id}_path.parquet"
         started_at = datetime.now()
         print(
@@ -214,7 +214,9 @@ def run_experiments(
                 sim_rate=100,
                 display=False,
                 save_data=True,
-                save_data_filename=data_file.removeprefix("results/data/"),
+                save_data_filename=(
+                    f"{'fail' if failure_enabled else 'nonfail'}/{run_id}.parquet"
+                ),
                 print_path=not failure_enabled,
                 print_path_filename=(
                     None if failure_enabled else f"{run_id}_path.parquet"
@@ -245,12 +247,17 @@ def run_experiments(
             else:
                 edit_run_status(run_id, result["outcome"])
 
-            _record_result(run_id, result, started_at, finished_at, data_file)
+            _record_result(run_id, result, started_at, finished_at)
+            (fail_run_ids if failure_enabled else nonfail_run_ids).append(run_id)
+            if len(fail_run_ids) >= 100:
+                merge_fail_data()
+            if len(nonfail_run_ids) >= 100:
+                merge_nonfail_data()
             print(f"Run {run_id} result: {result['outcome']}")
             print("=" * 72)
             recorded_results.append(result)
         except Exception as error:
-            _record_failed_exception(run_id, error, started_at, data_file)
+            _record_failed_exception(run_id, error, started_at)
             print(f"Run {run_id} result: failed ({error})")
             print("=" * 72)
             recorded_results.append(
@@ -260,6 +267,8 @@ def run_experiments(
                 }
             )
 
+    merge_fail_data()
+    merge_nonfail_data()
     return recorded_results
 
 

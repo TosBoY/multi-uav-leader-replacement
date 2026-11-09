@@ -2,14 +2,11 @@
 
 from datetime import datetime
 from pathlib import Path
-import csv
-
-import duckdb
 
 try:
-    from experiments.setup.common import REGISTRY_DIRECTORY
+    from experiments.setup.common import DATABASE_PATH, connect_database
 except ModuleNotFoundError:
-    from common import REGISTRY_DIRECTORY
+    from common import DATABASE_PATH, connect_database
 
 
 RESULT_COLUMNS = [
@@ -26,30 +23,38 @@ RESULT_COLUMNS = [
     "promotion_time",
 ]
 RESULT_OUTCOMES = ("done", "failed", "infeasible")
-DEFAULT_RESULTS_FILE = REGISTRY_DIRECTORY / "runs_result.csv"
+DEFAULT_DATABASE = DATABASE_PATH
 
 
-def make_runs_result_csv(
-    output_path: str | Path = DEFAULT_RESULTS_FILE,
+def make_runs_result_table(
+    output_path: str | Path = DEFAULT_DATABASE,
 ) -> Path:
-    """Create an empty runs-result CSV with the required header."""
-    destination = Path(output_path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("w", newline="", encoding="utf-8") as csv_file:
-        csv.writer(csv_file).writerow(RESULT_COLUMNS)
-    return destination
+    """Create or replace the empty runs-result registry table."""
+    with connect_database() as connection:
+        connection.execute("DROP TABLE IF EXISTS registry.runs_result")
+        connection.execute(
+            """
+            CREATE TABLE registry.runs_result (
+                run_id BIGINT, attempt BIGINT, outcome VARCHAR, error VARCHAR,
+                started_at VARCHAR, finished_at VARCHAR, duration DOUBLE,
+                data_file VARCHAR, n_steps BIGINT, promoted_leader VARCHAR,
+                promotion_time DOUBLE
+            )
+            """
+        )
+    return Path(output_path)
 
 
-def _next_attempt(run_id: int, output_path: Path) -> int:
+def _next_attempt(run_id: int) -> int:
     """Return the next attempt number for a run using DuckDB."""
-    with duckdb.connect() as connection:
+    with connect_database() as connection:
         result = connection.execute(
             """
             SELECT COALESCE(MAX(CAST(attempt AS BIGINT)), 0) + 1
-            FROM read_csv_auto(?, HEADER = TRUE)
+            FROM registry.runs_result
             WHERE run_id = ?
             """,
-            [str(output_path), run_id],
+            [run_id],
         ).fetchone()
     return int(result[0])
 
@@ -60,18 +65,17 @@ def data_input(
     started_at: datetime | str,
     finished_at: datetime | str,
     duration: float,
-    data_file: str | Path,
     n_steps: int,
+    data_file: str | Path | None = None,
     promoted_leader: int | str | None = None,
     promotion_time: float | None = None,
     error: str | None = None,
-    output_path: str | Path = DEFAULT_RESULTS_FILE,
+    output_path: str | Path = DEFAULT_DATABASE,
 ) -> Path:
     """Append one result row and calculate its attempt number.
 
     ``started_at`` and ``finished_at`` may be datetime objects or strings.
-    Error text is written as a quoted CSV field when it contains special
-    characters. Successful rows always store an empty error field.
+    ``data_file`` is populated later by the Parquet merger.
     """
     if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1:
         raise ValueError("run_id must be a positive integer.")
@@ -84,11 +88,7 @@ def data_input(
     if isinstance(n_steps, bool) or not isinstance(n_steps, int) or n_steps < 0:
         raise ValueError("n_steps must be a non-negative integer.")
 
-    destination = Path(output_path)
-    if not destination.exists() or destination.stat().st_size == 0:
-        make_runs_result_csv(destination)
-
-    attempt = _next_attempt(run_id, destination)
+    attempt = _next_attempt(run_id)
     started_value = (
         started_at.isoformat() if isinstance(started_at, datetime) else str(started_at)
     )
@@ -97,23 +97,33 @@ def data_input(
         if isinstance(finished_at, datetime)
         else str(finished_at)
     )
-    row = {
-        "run_id": run_id,
-        "attempt": attempt,
-        "outcome": outcome,
-        "error": error if outcome == "failed" else "",
-        "started_at": started_value,
-        "finished_at": finished_value,
-        "duration": duration,
-        "data_file": str(data_file),
-        "n_steps": n_steps,
-        "promoted_leader": "" if promoted_leader is None else promoted_leader,
-        "promotion_time": "" if promotion_time is None else promotion_time,
-    }
-    with destination.open("a", newline="", encoding="utf-8") as csv_file:
-        csv.DictWriter(csv_file, fieldnames=RESULT_COLUMNS).writerow(row)
-    return destination
+    with connect_database() as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS registry.runs_result (
+                run_id BIGINT, attempt BIGINT, outcome VARCHAR, error VARCHAR,
+                started_at VARCHAR, finished_at VARCHAR, duration DOUBLE,
+                data_file VARCHAR, n_steps BIGINT, promoted_leader VARCHAR,
+                promotion_time DOUBLE
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO registry.runs_result
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                run_id, attempt, outcome, error if outcome == "failed" else "",
+                started_value, finished_value, duration, data_file, n_steps,
+                promoted_leader, promotion_time,
+            ],
+        )
+    return Path(output_path)
 
 
 if __name__ == "__main__":
-    make_runs_result_csv()
+    make_runs_result_table()
+
+
+make_runs_result_csv = make_runs_result_table
