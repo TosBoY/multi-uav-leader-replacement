@@ -24,8 +24,8 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
         }
         leader_speed = 1
         leader_heading = 0.0
-        simulation_time = 10.0
-        leader_failure_time = simulation_time / 2.0
+        simulation_time = 20.0
+        leader_failure_time = 10.0
         leader_path = make_leader_path(
             path_type="random",
             first_waypoint=initial_positions[0],
@@ -47,7 +47,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             sim_rate=100,
             t_final=simulation_time,
             display=False,
-            save_data=False,
+            save_data=True,
             print_to_console=False,
         )
 

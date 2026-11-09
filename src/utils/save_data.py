@@ -36,6 +36,7 @@ def save_simulation_data(
     positions = results["positions"]
     rotations = results["rotations"]
     wind = results["wind"]
+    travel_distance_history = results["travel_distances"]
     leader_history = results["leader_history"]
     failed_history = results["failed_history"]
     promotion_time = results["promotion_time"]
@@ -68,6 +69,9 @@ def save_simulation_data(
                     "wind_x": float(wind_vector[0]),
                     "wind_y": float(wind_vector[1]),
                     "wind_z": float(wind_vector[2]),
+                    "travel_distance": float(
+                        travel_distance_history[time_index, drone_index]
+                    ),
                     "promotion_time": promotion_time,
                 }
             )

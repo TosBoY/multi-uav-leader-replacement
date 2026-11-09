@@ -14,13 +14,13 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
 
     def test_path_maker_to_sim_runner(self):
         """Promote a random follower after the initial leader fails."""
-        drones = [0, 1, 2, 3, 4, 5, 6]
+        drones = [0, 1, 2, 3, 4]
         initial_leader = 0
         leader_start = np.array([0, 0.0, 1.0])
         initial_positions = make_formation(
             number_of_drones=len(drones),
             formation_type="leader_follower",
-            shape="sphere",
+            shape="grid",
             spread=1.0,
             plane="yz",
             leader_index=initial_leader,
