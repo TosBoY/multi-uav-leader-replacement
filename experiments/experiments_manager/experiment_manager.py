@@ -3,9 +3,27 @@
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any, cast
 
-PARQUET_MERGE_BATCH_SIZE = 3
+PARQUET_MERGE_BATCH_SIZE = 1000
+
+
+def _format_elapsed_time(seconds: float) -> str:
+    """Format elapsed seconds as days, hours, minutes, and seconds."""
+    whole_seconds = int(seconds)
+    days, remainder = divmod(whole_seconds, 24 * 60 * 60)
+    hours, remainder = divmod(remainder, 60 * 60)
+    minutes, remaining_seconds = divmod(remainder, 60)
+
+    if days:
+        return f"{days}d {hours}h {minutes}m {remaining_seconds}s"
+    if hours:
+        return f"{hours}h {minutes}m {remaining_seconds}s"
+    if minutes:
+        return f"{minutes}m {remaining_seconds}s"
+    return f"{seconds:.2f}s"
+
 
 try:
     from analysis.run_analysis.check_feasibility import check_feasibility
@@ -155,7 +173,17 @@ def run_experiments(
     Empty or ``None`` filters select all values for that field. Numeric ranges
     with two values are inclusive; other numeric sequences select exact IDs.
     """
+    start_time = perf_counter()
     runs = _load_runs(run_id_range, number_of_drone_range, shape_range)
+    if runs:
+        print(
+            f"Running {len(runs)} experiments "
+            f"(run IDs {runs[0]['runs_id']}-{runs[-1]['runs_id']}, "
+            f"number of drones: {number_of_drone_range or 'all'}, "
+            f"shapes: {shape_range or 'all'})"
+        )
+    else:
+        print("No experiments match the selected range.")
     recorded_results: list[dict[str, Any]] = []
     fail_run_ids: list[int] = []
     nonfail_run_ids: list[int] = []
@@ -176,20 +204,13 @@ def run_experiments(
 
     for run in runs:
         run_id = int(run["runs_id"])
-        print("\n" + "=" * 72)
         if str(run["status"]) == "infeasible":
             print(f"Skipping run {run_id}: already infeasible")
-            print("=" * 72)
             continue
 
         failure_enabled = bool(run["leader_failure_enabled"])
         trajectory_file = f"results/data/trajectories/{run_id}_path.parquet"
         started_at = datetime.now()
-        print(
-            f"Running run {run_id} "
-            f"(path/formation: {run['path_type']}/{run['shape']}, "
-            f"failure: {failure_enabled})"
-        )
         edit_run_status(run_id, "running")
 
         try:
@@ -230,7 +251,6 @@ def run_experiments(
                     f"{run_id}.parquet",
                     f"{run_id}_path.parquet",
                 )
-                print(f"Run {run_id} feasibility: {feasibility}")
                 if feasibility["result"] == "infeasible":
                     feasible_data_input(
                         run_id=run_id,
@@ -244,6 +264,10 @@ def run_experiments(
                     )
                     edit_run_status(run_id, "infeasible")
                     result["outcome"] = "infeasible"
+                    print(
+                        f"Run {run_id} result: infeasible - "
+                        f"{feasibility['reason']}"
+                    )
                 else:
                     edit_run_status(run_id, "done")
             else:
@@ -255,13 +279,12 @@ def run_experiments(
                 merge_fail_data()
             if len(nonfail_run_ids) >= PARQUET_MERGE_BATCH_SIZE:
                 merge_nonfail_data()
-            print(f"Run {run_id} result: {result['outcome']}")
-            print("=" * 72)
+            if result["outcome"] == "failed":
+                print(f"Run {run_id} result: {result['outcome']}")
             recorded_results.append(result)
         except Exception as error:
             _record_failed_exception(run_id, error, started_at)
             print(f"Run {run_id} result: failed ({error})")
-            print("=" * 72)
             recorded_results.append(
                 {
                     "outcome": "failed",
@@ -271,6 +294,8 @@ def run_experiments(
 
     merge_fail_data()
     merge_nonfail_data()
+    elapsed_time = perf_counter() - start_time
+    print(f"Finished experiments in {_format_elapsed_time(elapsed_time)}.")
     return recorded_results
 
 
