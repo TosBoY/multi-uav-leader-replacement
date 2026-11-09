@@ -294,9 +294,9 @@ def _run_simulation(
 
 	formation_coordinates: dict[Drone, tuple[float, float, float]] = {}
 	formation_frame = None
+	initial_path_flat = leader_path.update(0.0)
 	if route_aligned_formation:
-		initial_flat = leader_path.update(0.0)
-		formation_frame = _route_frame(initial_flat["x_dot"])
+		formation_frame = _route_frame(initial_path_flat["x_dot"])
 		initial_forward, initial_lateral, initial_vertical = formation_frame
 		formation_coordinates = {
 			drone: (
@@ -332,7 +332,9 @@ def _run_simulation(
 	quat_history = np.zeros((num_steps, len(drones), 4))
 	wind_history = np.zeros((num_steps, len(drones), 3))
 	travel_distance_history = np.zeros((num_steps, len(drones)))
-	intended_position_history = np.zeros((num_steps, len(drones), 3))
+	intended_position_history = (
+		np.zeros((num_steps, len(drones), 3)) if print_path else None
+	)
 	leader_history = np.empty(num_steps, dtype=object)
 	failed_history = np.zeros((num_steps, len(drones)), dtype=bool)
 
@@ -350,13 +352,15 @@ def _run_simulation(
 	promotion_time = None
 	leader_history[0] = active_leader
 	wind_profile = NoWind()
-	initial_path_flat = leader_path.update(0.0)
-	for drone in drones:
-		index = drone_indices[drone]
-		if drone == initial_leader:
-			intended_position_history[0, index] = initial_path_flat["x"]
-		else:
-			intended_position_history[0, index] = positions[initial_leader] + offsets[drone]
+	if intended_position_history is not None:
+		for drone in drones:
+			index = drone_indices[drone]
+			if drone == initial_leader:
+				intended_position_history[0, index] = initial_path_flat["x"]
+			else:
+				intended_position_history[0, index] = (
+					positions[initial_leader] + offsets[drone]
+				)
 
 	for step in range(1, num_steps):
 		time = step * dt
@@ -406,7 +410,8 @@ def _run_simulation(
 
 		leader_history[step] = active_leader
 		travel_distance_history[step] = travel_distance_history[step - 1]
-		intended_position_history[step] = intended_position_history[step - 1]
+		if intended_position_history is not None:
+			intended_position_history[step] = intended_position_history[step - 1]
 		for failed_drone in failed_drones:
 			failed_history[step, drone_indices[failed_drone]] = True
 
@@ -433,7 +438,8 @@ def _run_simulation(
 					desired_offset = offsets[drone]
 				desired_position = leader_position + desired_offset
 				flat_output = _make_flat_output(path_flat, desired_position)
-			intended_position_history[step, drone_indices[drone]] = flat_output["x"]
+			if intended_position_history is not None:
+				intended_position_history[step, drone_indices[drone]] = flat_output["x"]
 			controls[drone] = controllers[drone].update(
 				time,
 				states[drone],
@@ -504,6 +510,7 @@ def _run_simulation(
 		)
 		console_print(f"Simulation data saved to {saved_path}")
 	if print_path:
+		assert intended_position_history is not None
 		path_data_path = save_print_path(
 			intended_position_history,
 			time_history,

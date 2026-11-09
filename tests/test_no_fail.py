@@ -41,7 +41,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             initial_leader=0,
             initial_positions=initial_positions,
             leader_path=leader_path,
-            leader_failure_time= leader_failure_time,
+            leader_failure_time= None,
             election_type="closest",
             route_aligned_formation=True,
             sim_rate=100,

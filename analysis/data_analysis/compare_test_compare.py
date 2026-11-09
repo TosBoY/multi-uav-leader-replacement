@@ -15,10 +15,11 @@ import pandas as pd
 
 _REQUIRED_COLUMNS = {"timestamp", "drone", "is_leader", "failed", "x", "y", "z"}
 _POSITION_COLUMNS = ["x", "y", "z"]
-# This file lives in project/analysis/, so the project root is two levels up.
+# This file lives in project/analysis/data_analysis/, so the project root is
+# three levels up.
 # Anchoring to the file (not the working directory) means the report always
-# lands in project/result/analysis no matter where the script is run from.
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# lands in project/results/analysis no matter where the script is run from.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_OUTPUT_DIR = _PROJECT_ROOT / "results" / "analysis"
 
 
@@ -217,7 +218,7 @@ def analyse_leader_failure(
             whole rest of the run instead of just ``hold_time`` seconds.
         save: If true (the default), also write the printed report to a text
             file.
-        output_dir: Folder for the report (default ``<project>/result/analysis``,
+        output_dir: Folder for the report (default ``<project>/results/analysis``,
             where ``<project>`` is the parent of the folder holding this file).
             It is created if it does not exist.
     """
