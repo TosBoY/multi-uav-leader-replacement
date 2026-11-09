@@ -327,7 +327,7 @@ def _run_simulation(
 
 	num_steps = int(t_final * sim_rate) + 1
 	dt = 1.0 / sim_rate
-	time_history = np.zeros(num_steps)
+	time_history = np.arange(num_steps, dtype=float) * dt
 	position_history = np.zeros((num_steps, len(drones), 3))
 	quat_history = np.zeros((num_steps, len(drones), 4))
 	wind_history = np.zeros((num_steps, len(drones), 3))
@@ -363,8 +363,7 @@ def _run_simulation(
 				)
 
 	for step in range(1, num_steps):
-		time = step * dt
-		time_history[step] = time
+		time = time_history[step]
 
 		if (
 			leader_failure_time is not None
@@ -373,6 +372,7 @@ def _run_simulation(
 		):
 			failed_leader = active_leader
 			failed_drones.add(active_leader)
+			failed_history[step:, drone_indices[failed_leader]] = True
 			active_drones.remove(active_leader)
 			if not active_drones:
 				raise ValueError("The failed leader was the only active drone.")
@@ -412,8 +412,6 @@ def _run_simulation(
 		travel_distance_history[step] = travel_distance_history[step - 1]
 		if intended_position_history is not None:
 			intended_position_history[step] = intended_position_history[step - 1]
-		for failed_drone in failed_drones:
-			failed_history[step, drone_indices[failed_drone]] = True
 
 		path_flat = leader_path.update(time)
 		if route_aligned_formation:

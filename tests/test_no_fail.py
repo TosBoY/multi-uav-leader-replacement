@@ -41,7 +41,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             initial_leader=0,
             initial_positions=initial_positions,
             leader_path=leader_path,
-            leader_failure_time= None,
+            leader_failure_time= leader_failure_time,
             election_type="closest",
             route_aligned_formation=True,
             sim_rate=100,
@@ -63,8 +63,8 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
         self.assertIsNone(results["promotion_time"])
         self.assertEqual(results["leader_history"][0], 0)
         self.assertTrue(np.all(results["leader_history"] == 0))
-        self.assertEqual(results["positions"].shape, (1001, 5, 3))
-        self.assertEqual(results["rotations"].shape, (1001, 5, 3, 3))
+        self.assertEqual(results["positions"].shape, (2001, 5, 3))
+        self.assertEqual(results["rotations"].shape, (2001, 5, 3, 3))
         self.assertFalse(results["failed_history"].any())
         self.assertFalse(np.isnan(results["positions"]).any())
 
