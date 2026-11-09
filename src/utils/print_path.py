@@ -39,18 +39,17 @@ def print_path(
         destination = destination.with_suffix(".parquet")
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    rows = []
-    for time_index, timestamp in enumerate(times):
-        for drone_index, drone in enumerate(drones):
-            position = intended_positions[time_index, drone_index]
-            rows.append(
-                {
-                    "timestamp": float(timestamp),
-                    "drone": drone,
-                    "x": float(position[0]),
-                    "y": float(position[1]),
-                    "z": float(position[2]),
-                }
-            )
-    pd.DataFrame(rows).to_parquet(destination, index=False)
+    time_values = np.asarray(times, dtype=float)
+    drone_values = np.asarray(drones)
+    flat_positions = np.asarray(intended_positions, dtype=float).reshape(-1, 3)
+    frame = pd.DataFrame(
+        {
+            "timestamp": np.repeat(time_values, len(drone_values)),
+            "drone": np.tile(drone_values, len(time_values)),
+            "x": flat_positions[:, 0],
+            "y": flat_positions[:, 1],
+            "z": flat_positions[:, 2],
+        }
+    )
+    frame.to_parquet(destination, index=False)
     return destination

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import numpy as np
 
 
 _DATA_DIRECTORY = Path(__file__).resolve().parents[2] / "results" / "data"
@@ -41,40 +42,42 @@ def save_simulation_data(
     failed_history = results["failed_history"]
     promotion_time = results["promotion_time"]
 
-    rows: list[dict[str, Any]] = []
-    for time_index, timestamp in enumerate(times):
-        current_leader = leader_history[time_index]
-        for drone_index, drone in enumerate(drones):
-            position = positions[time_index, drone_index]
-            rotation = rotations[time_index, drone_index]
-            wind_vector = wind[time_index, drone_index]
-            rows.append(
-                {
-                    "timestamp": float(timestamp),
-                    "drone": drone,
-                    "is_leader": drone == current_leader,
-                    "failed": bool(failed_history[time_index, drone_index]),
-                    "x": float(position[0]),
-                    "y": float(position[1]),
-                    "z": float(position[2]),
-                    "rotation_00": float(rotation[0, 0]),
-                    "rotation_01": float(rotation[0, 1]),
-                    "rotation_02": float(rotation[0, 2]),
-                    "rotation_10": float(rotation[1, 0]),
-                    "rotation_11": float(rotation[1, 1]),
-                    "rotation_12": float(rotation[1, 2]),
-                    "rotation_20": float(rotation[2, 0]),
-                    "rotation_21": float(rotation[2, 1]),
-                    "rotation_22": float(rotation[2, 2]),
-                    "wind_x": float(wind_vector[0]),
-                    "wind_y": float(wind_vector[1]),
-                    "wind_z": float(wind_vector[2]),
-                    "travel_distance": float(
-                        travel_distance_history[time_index, drone_index]
-                    ),
-                    "promotion_time": promotion_time,
-                }
-            )
+    time_values = np.asarray(times, dtype=float)
+    drone_values = np.asarray(drones)
+    timestamps = np.repeat(time_values, len(drone_values))
+    repeated_leaders = np.repeat(np.asarray(leader_history), len(drone_values))
+    tiled_drones = np.tile(drone_values, len(time_values))
+    flat_positions = np.asarray(positions, dtype=float).reshape(-1, 3)
+    flat_rotations = np.asarray(rotations, dtype=float).reshape(-1, 3, 3)
+    flat_wind = np.asarray(wind, dtype=float).reshape(-1, 3)
+
+    frame = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "drone": tiled_drones,
+            "is_leader": tiled_drones == repeated_leaders,
+            "failed": np.asarray(failed_history, dtype=bool).reshape(-1),
+            "x": flat_positions[:, 0],
+            "y": flat_positions[:, 1],
+            "z": flat_positions[:, 2],
+            "rotation_00": flat_rotations[:, 0, 0],
+            "rotation_01": flat_rotations[:, 0, 1],
+            "rotation_02": flat_rotations[:, 0, 2],
+            "rotation_10": flat_rotations[:, 1, 0],
+            "rotation_11": flat_rotations[:, 1, 1],
+            "rotation_12": flat_rotations[:, 1, 2],
+            "rotation_20": flat_rotations[:, 2, 0],
+            "rotation_21": flat_rotations[:, 2, 1],
+            "rotation_22": flat_rotations[:, 2, 2],
+            "wind_x": flat_wind[:, 0],
+            "wind_y": flat_wind[:, 1],
+            "wind_z": flat_wind[:, 2],
+            "travel_distance": np.asarray(
+                travel_distance_history, dtype=float
+            ).reshape(-1),
+            "promotion_time": promotion_time,
+        }
+    )
 
     if output_filename is not None:
         destination = _DATA_DIRECTORY / Path(output_filename)
@@ -84,5 +87,5 @@ def save_simulation_data(
     else:
         destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_parquet(destination, index=False)
+    frame.to_parquet(destination, index=False)
     return destination
