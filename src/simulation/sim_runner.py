@@ -409,7 +409,6 @@ def _run_simulation(
 			)
 
 		leader_history[step] = active_leader
-		travel_distance_history[step] = travel_distance_history[step - 1]
 		if intended_position_history is not None:
 			intended_position_history[step] = intended_position_history[step - 1]
 
@@ -419,7 +418,7 @@ def _run_simulation(
 				path_flat["x_dot"],
 				formation_frame,
 			)
-		leader_position = states[active_leader]["x"].copy()
+		leader_position = states[active_leader]["x"]
 		controls = {}
 
 		for drone in active_drones:
@@ -448,6 +447,9 @@ def _run_simulation(
 			index = drone_indices[drone]
 			if drone in failed_drones:
 				position_history[step, index] = np.nan
+				travel_distance_history[step, index] = (
+					travel_distance_history[step - 1, index]
+				)
 				quat_history[step, index] = quat_history[step - 1, index]
 				wind_history[step, index] = wind_history[step - 1, index]
 				continue
@@ -462,8 +464,11 @@ def _run_simulation(
 				dt,
 			)
 			position_history[step, index] = states[drone]["x"]
-			travel_distance_history[step, index] += np.linalg.norm(
-				states[drone]["x"] - position_history[step - 1, index]
+			travel_distance_history[step, index] = (
+				travel_distance_history[step - 1, index]
+				+ np.linalg.norm(
+					states[drone]["x"] - position_history[step - 1, index]
+				)
 			)
 			quat_history[step, index] = states[drone]["q"]
 			wind_history[step, index] = states[drone]["wind"]
