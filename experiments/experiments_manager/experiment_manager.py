@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
+PARQUET_MERGE_BATCH_SIZE = 3
+
 try:
     from analysis.run_analysis.check_feasibility import check_feasibility
     from experiments.setup.common import connect_database
@@ -249,9 +251,9 @@ def run_experiments(
 
             _record_result(run_id, result, started_at, finished_at)
             (fail_run_ids if failure_enabled else nonfail_run_ids).append(run_id)
-            if len(fail_run_ids) >= 100:
+            if len(fail_run_ids) >= PARQUET_MERGE_BATCH_SIZE:
                 merge_fail_data()
-            if len(nonfail_run_ids) >= 100:
+            if len(nonfail_run_ids) >= PARQUET_MERGE_BATCH_SIZE:
                 merge_nonfail_data()
             print(f"Run {run_id} result: {result['outcome']}")
             print("=" * 72)

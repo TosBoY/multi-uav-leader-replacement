@@ -35,7 +35,7 @@ def merge_parquet_files(folder_path: str | Path, run_ids: Sequence[int]) -> Path
     parameters: list[object] = []
     for run_id, source_path in zip(ids, source_paths):
         query_parts.append(
-            "SELECT *, CAST(? AS BIGINT) AS run_id FROM read_parquet(?)"
+            "SELECT CAST(? AS BIGINT) AS run_id, * FROM read_parquet(?)"
         )
         parameters.extend([run_id, str(source_path)])
 
