@@ -1,11 +1,13 @@
 """Run registered experiments and record their outcomes."""
 
 from collections.abc import Sequence
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any, cast
 
+CONCURRENT_SIMULATIONS = 8
 PARQUET_MERGE_BATCH_SIZE = 1000
 
 
@@ -125,6 +127,23 @@ def _load_runs(
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
 
+def _load_current_statuses(run_ids: Sequence[int]) -> dict[int, str]:
+    """Load current statuses for selected runs immediately before batching."""
+    if not run_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in run_ids)
+    with connect_database() as connection:
+        rows = connection.execute(
+            f"""
+            SELECT runs_id, status
+            FROM registry.runs
+            WHERE runs_id IN ({placeholders})
+            """,
+            list(run_ids),
+        ).fetchall()
+    return {int(run_id): str(status) for run_id, status in rows}
+
+
 def _record_result(
     run_id: int,
     result: dict[str, Any],
@@ -163,16 +182,80 @@ def _record_failed_exception(
     edit_run_status(run_id, "failed")
 
 
+def _execute_run(run: dict[str, Any]) -> dict[str, Any]:
+    """Run one experiment in a worker process without touching the database."""
+    run_id = int(run["runs_id"])
+    started_at = datetime.now()
+    failure_enabled = bool(run["leader_failure_enabled"])
+    try:
+        result = make_experiment(
+            number_of_drones=int(run["number_of_drone"]),
+            initial_leader=int(run["init_leader"]),
+            leader_position=[
+                float(run["leader_position_x"]),
+                float(run["leader_position_y"]),
+                float(run["leader_position_z"]),
+            ],
+            shape=cast(Any, str(run["shape"])),
+            spread=float(run["spread"]),
+            plane=cast(Any, str(run["plane"] or "xy")),
+            path_type=cast(Any, str(run["path_type"])),
+            velocity=float(run["velocity"]),
+            simulation_time=float(run["time"]),
+            initial_heading=float(run["initial_heading"]),
+            path_seed=(None if run["seed"] in (None, "") else int(run["seed"])),
+            leader_failure_time=(
+                None if not failure_enabled else float(run["fail_time"])
+            ),
+            election_type=cast(Any, str(run["election_type"])),
+            sim_rate=100,
+            display=False,
+            save_data=True,
+            save_data_filename=(
+                f"{'fail' if failure_enabled else 'nonfail'}/{run_id}.parquet"
+            ),
+            print_path=not failure_enabled,
+            print_path_filename=(
+                None if failure_enabled else f"{run_id}_path.parquet"
+            ),
+        )
+    except Exception as error:
+        result = {
+            "outcome": "failed",
+            "error": f"{type(error).__name__}: {error}",
+            "duration": 0.0,
+            "n_steps": 0,
+            "promoted_leader": None,
+            "promotion_time": None,
+        }
+    return {
+        "run_id": run_id,
+        "failure_enabled": failure_enabled,
+        "result": result,
+        "started_at": started_at,
+        "finished_at": datetime.now(),
+    }
+
+
 def run_experiments(
     run_id_range: Sequence[int] | None = None,
     number_of_drone_range: Sequence[int] | None = None,
     shape_range: Sequence[str] | None = None,
+    concurrent_simulations: int = CONCURRENT_SIMULATIONS,
 ) -> list[dict[str, Any]]:
     """Run selected registry experiments in ascending ``run_id`` order.
 
     Empty or ``None`` filters select all values for that field. Numeric ranges
     with two values are inclusive; other numeric sequences select exact IDs.
+    ``concurrent_simulations`` controls the maximum number of worker processes.
     """
+    if (
+        isinstance(concurrent_simulations, bool)
+        or not isinstance(concurrent_simulations, int)
+        or concurrent_simulations < 1
+    ):
+        raise ValueError("concurrent_simulations must be a positive integer.")
+
     start_time = perf_counter()
     runs = _load_runs(run_id_range, number_of_drone_range, shape_range)
     if runs:
@@ -202,50 +285,34 @@ def run_experiments(
             merge_parquet_files(data_root / "trajectories", nonfail_run_ids)
             nonfail_run_ids.clear()
 
-    for run in runs:
-        run_id = int(run["runs_id"])
-        if str(run["status"]) == "infeasible":
-            print(f"Skipping run {run_id}: already infeasible")
-            continue
+    def select_batch(start_index: int) -> tuple[list[dict[str, Any]], int]:
+        """Select up to the worker limit, ending after the first non-fail run."""
+        batch: list[dict[str, Any]] = []
+        index = start_index
+        current_statuses = _load_current_statuses(
+            [int(run["runs_id"]) for run in runs[start_index:]]
+        )
+        while index < len(runs) and len(batch) < concurrent_simulations:
+            run = runs[index]
+            index += 1
+            run_id = int(run["runs_id"])
+            if current_statuses.get(run_id, str(run["status"])) == "infeasible":
+                print(f"Skipping run {run_id}: already infeasible")
+                continue
+            batch.append(run)
+            if not bool(run["leader_failure_enabled"]):
+                break
+        return batch, index
 
-        failure_enabled = bool(run["leader_failure_enabled"])
-        trajectory_file = f"results/data/trajectories/{run_id}_path.parquet"
-        started_at = datetime.now()
-        edit_run_status(run_id, "running")
+    def process_result(worker_result: dict[str, Any]) -> None:
+        """Apply one completed worker result in run-ID order."""
+        run_id = int(worker_result["run_id"])
+        failure_enabled = bool(worker_result["failure_enabled"])
+        result = worker_result["result"]
+        started_at = cast(datetime, worker_result["started_at"])
+        finished_at = cast(datetime, worker_result["finished_at"])
 
         try:
-            result = make_experiment(
-                number_of_drones=int(run["number_of_drone"]),
-                initial_leader=int(run["init_leader"]),
-                leader_position=[
-                    float(run["leader_position_x"]),
-                    float(run["leader_position_y"]),
-                    float(run["leader_position_z"]),
-                ],
-                shape=cast(Any, str(run["shape"])),
-                spread=float(run["spread"]),
-                plane=cast(Any, str(run["plane"] or "xy")),
-                path_type=cast(Any, str(run["path_type"])),
-                velocity=float(run["velocity"]),
-                simulation_time=float(run["time"]),
-                initial_heading=float(run["initial_heading"]),
-                path_seed=(None if run["seed"] in (None, "") else int(run["seed"])),
-                leader_failure_time=(
-                    None if not failure_enabled else float(run["fail_time"])
-                ),
-                election_type=cast(Any, str(run["election_type"])),
-                sim_rate=100,
-                display=False,
-                save_data=True,
-                save_data_filename=(
-                    f"{'fail' if failure_enabled else 'nonfail'}/{run_id}.parquet"
-                ),
-                print_path=not failure_enabled,
-                print_path_filename=(
-                    None if failure_enabled else f"{run_id}_path.parquet"
-                ),
-            )
-            finished_at = datetime.now()
             if not failure_enabled and result["outcome"] == "done":
                 feasibility = check_feasibility(
                     f"{run_id}.parquet",
@@ -291,6 +358,19 @@ def run_experiments(
                     "error": f"{type(error).__name__}: {error}",
                 }
             )
+
+    next_index = 0
+    with ProcessPoolExecutor(max_workers=concurrent_simulations) as executor:
+        while next_index < len(runs):
+            batch, next_index = select_batch(next_index)
+            for run in batch:
+                edit_run_status(int(run["runs_id"]), "running")
+            worker_results = executor.map(_execute_run, batch)
+            for worker_result in sorted(
+                worker_results,
+                key=lambda item: item["run_id"],
+            ):
+                process_result(worker_result)
 
     merge_fail_data()
     merge_nonfail_data()
