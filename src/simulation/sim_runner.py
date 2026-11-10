@@ -80,6 +80,18 @@ def _route_aligned_offset(
 ) -> np.ndarray:
 	"""Convert route-relative coordinates into a world offset."""
 	forward, lateral, vertical = _route_frame(velocity, fallback_frame)
+	return _offset_from_route_frame(
+		(forward, lateral, vertical),
+		formation_coordinates,
+	)
+
+
+def _offset_from_route_frame(
+	formation_frame: tuple[np.ndarray, np.ndarray, np.ndarray],
+	formation_coordinates: tuple[float, float, float],
+) -> np.ndarray:
+	"""Convert route-relative coordinates using an already computed frame."""
+	forward, lateral, vertical = formation_frame
 	behind, lateral_distance, vertical_distance = formation_coordinates
 	return (
 		-behind * forward
@@ -426,11 +438,11 @@ def _run_simulation(
 				flat_output = path_flat
 			else:
 				if route_aligned_formation:
-					desired_offset = _route_aligned_offset(
-					path_flat["x_dot"],
-					formation_coordinates[drone],
-					formation_frame,
-				)
+					assert formation_frame is not None
+					desired_offset = _offset_from_route_frame(
+						formation_frame,
+						formation_coordinates[drone],
+					)
 				else:
 					desired_offset = offsets[drone]
 				desired_position = leader_position + desired_offset
