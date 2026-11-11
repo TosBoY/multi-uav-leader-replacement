@@ -53,7 +53,7 @@ run_rows AS (
         FALSE AS leader_failure_enabled,
         CAST(NULL AS DOUBLE) AS fail_time,
         0 AS init_leader,
-        'closest' AS election_type,
+        CAST(NULL AS VARCHAR) AS election_type,
         'planned' AS status,
         0 AS row_order
     FROM combinations
@@ -122,18 +122,26 @@ def edit_run(
         raise TypeError("runs_id must be an integer.")
     if any(field not in RUN_COLUMNS[1:] for field in updates):
         raise ValueError("Updates contain an unknown or non-editable field.")
-    if "election_type" in updates:
+    if "election_type" in updates and updates["election_type"] is not None:
         validate_choice(str(updates["election_type"]), ELECTION_TYPES, "election_type")
     if "status" in updates:
         validate_choice(str(updates["status"]), RUN_STATUSES, "status")
 
     with connect_database() as connection:
         selected = connection.execute(
-            "SELECT path_id, formation_id FROM registry.runs WHERE runs_id = ?",
+            """
+            SELECT path_id, formation_id, leader_failure_enabled
+            FROM registry.runs
+            WHERE runs_id = ?
+            """,
             [runs_id],
         ).fetchone()
         if selected is None:
             raise ValueError(f"No run with runs_id={runs_id} exists.")
+        failure_enabled = updates.get("leader_failure_enabled", selected[2])
+        if not failure_enabled:
+            updates["fail_time"] = None
+            updates["election_type"] = None
         for field, value in updates.items():
             connection.execute(
                 f'UPDATE registry.runs SET "{field}" = ? WHERE runs_id = ?',

@@ -8,7 +8,7 @@ from time import perf_counter
 from typing import Any, cast
 
 CONCURRENT_SIMULATIONS = 8
-PARQUET_MERGE_BATCH_SIZE = 1000
+PARQUET_MERGE_BATCH_SIZE = 10000
 
 
 def _format_elapsed_time(seconds: float) -> str:

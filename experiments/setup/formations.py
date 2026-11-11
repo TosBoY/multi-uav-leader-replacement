@@ -37,6 +37,7 @@ FORMATION_SHAPES = (
     "sphere",
     "grid",
 )
+FORMATION_SHAPES_WITHOUT_PLANE = ("line_x", "line_y", "line_z", "sphere")
 FORMATION_PLANES = ("xy", "xz", "yz")
 DEFAULT_NUMBER_OF_DRONES = tuple(range(5, 9))
 DEFAULT_SPREADS = (1.0, 2.0, 3.0)
@@ -77,16 +78,17 @@ def generate_formations(
     for count in number_of_drones:
         for shape in shapes:
             for spread in spreads:
-                formation_planes = (None,) if shape == "sphere" else planes
+                formation_planes = (
+                    (None,) if shape in FORMATION_SHAPES_WITHOUT_PLANE else planes
+                )
                 for plane in formation_planes:
-                    formation_plane = "" if shape == "sphere" else plane
                     rows.append(
                         {
                             "formation_id": formation_id,
                             "number_of_drone": count,
                             "shape": shape,
                             "spread": spread,
-                            "plane": formation_plane,
+                            "plane": plane,
                             "leader_index": DEFAULT_LEADER_INDEX,
                             "leader_position_x": DEFAULT_LEADER_POSITION[0],
                             "leader_position_y": DEFAULT_LEADER_POSITION[1],
@@ -143,9 +145,17 @@ def edit_formation(
         raise ValueError("Updates contain an unknown or non-editable field.")
     if "shape" in updates:
         validate_choice(str(updates["shape"]), FORMATION_SHAPES, "shape")
-        if updates["shape"] == "sphere":
-            updates["plane"] = ""
-    if "plane" in updates:
+    if "plane" in updates and "shape" not in updates:
+        with connect_database() as connection:
+            current_shape = connection.execute(
+                "SELECT shape FROM registry.formations WHERE formation_id = ?",
+                [formation_id],
+            ).fetchone()
+        if current_shape is not None and current_shape[0] in FORMATION_SHAPES_WITHOUT_PLANE:
+            updates["plane"] = None
+    if updates.get("shape") in FORMATION_SHAPES_WITHOUT_PLANE:
+        updates["plane"] = None
+    if "plane" in updates and updates["plane"] is not None:
         validate_choice(str(updates["plane"]), FORMATION_PLANES, "plane")
 
     with connect_database() as connection:
