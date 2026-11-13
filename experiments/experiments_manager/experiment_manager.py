@@ -1,7 +1,13 @@
 """Run registered experiments and record their outcomes."""
 
+import os
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
 from collections.abc import Sequence
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -28,7 +34,7 @@ def _format_elapsed_time(seconds: float) -> str:
 
 
 try:
-    from analysis.run_analysis.check_feasibility import check_feasibility
+    from analysis.per_run_analysis.check_feasibility import check_feasibility
     from experiments.setup.common import connect_database
     from experiments.setup.feasible import data_input as feasible_data_input
     from experiments.setup.runs import edit_run_status
@@ -40,7 +46,7 @@ except ModuleNotFoundError:
     import sys
 
     sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
-    from analysis.run_analysis.check_feasibility import check_feasibility
+    from analysis.per_run_analysis.check_feasibility import check_feasibility
     from experiments.setup.common import connect_database
     from experiments.setup.feasible import data_input as feasible_data_input
     from experiments.setup.runs import edit_run_status
@@ -94,6 +100,8 @@ def _load_runs(
     query = f"""
         SELECT
             r.runs_id,
+            r.path_id,
+            r.formation_id,
             r.leader_failure_enabled,
             r.fail_time,
             r.init_leader,
@@ -285,25 +293,6 @@ def run_experiments(
             merge_parquet_files(data_root / "trajectories", nonfail_run_ids)
             nonfail_run_ids.clear()
 
-    def select_batch(start_index: int) -> tuple[list[dict[str, Any]], int]:
-        """Select up to the worker limit, ending after the first non-fail run."""
-        batch: list[dict[str, Any]] = []
-        index = start_index
-        current_statuses = _load_current_statuses(
-            [int(run["runs_id"]) for run in runs[start_index:]]
-        )
-        while index < len(runs) and len(batch) < concurrent_simulations:
-            run = runs[index]
-            index += 1
-            run_id = int(run["runs_id"])
-            if current_statuses.get(run_id, str(run["status"])) == "infeasible":
-                print(f"Skipping run {run_id}: already infeasible")
-                continue
-            batch.append(run)
-            if not bool(run["leader_failure_enabled"]):
-                break
-        return batch, index
-
     def process_result(worker_result: dict[str, Any]) -> None:
         """Apply one completed worker result in run-ID order."""
         run_id = int(worker_result["run_id"])
@@ -359,18 +348,94 @@ def run_experiments(
                 }
             )
 
-    next_index = 0
+    def run_phase(
+        phase_runs: Sequence[dict[str, Any]],
+        executor: ProcessPoolExecutor,
+    ) -> None:
+        """Run one phase with a bounded rolling set of worker futures."""
+        pending_runs = iter(phase_runs)
+        futures: dict[Any, dict[str, Any]] = {}
+        pool_error: Exception | None = None
+
+        def submit_next() -> bool:
+            nonlocal pool_error
+            try:
+                run = next(pending_runs)
+            except StopIteration:
+                return False
+            run_id = int(run["runs_id"])
+            edit_run_status(run_id, "running")
+            try:
+                futures[executor.submit(_execute_run, run)] = run
+            except Exception as error:
+                pool_error = error
+                print(f"Failed to submit run {run_id}: {error}")
+            return True
+
+        for _ in range(min(concurrent_simulations, len(phase_runs))):
+            if not submit_next() or pool_error is not None:
+                break
+
+        while futures:
+            completed, _ = wait(
+                futures,
+                return_when=FIRST_COMPLETED,
+            )
+            for future in as_completed(completed):
+                run = futures.pop(future)
+                run_id = int(run["runs_id"])
+                try:
+                    worker_result = future.result()
+                except Exception as error:
+                    _record_failed_exception(run_id, error, datetime.now())
+                    print(f"Run {run_id} result: failed ({error})")
+                    recorded_results.append(
+                        {
+                            "outcome": "failed",
+                            "error": f"{type(error).__name__}: {error}",
+                        }
+                    )
+                else:
+                    process_result(worker_result)
+                if pool_error is None:
+                    submit_next()
+
+        if pool_error is not None:
+            raise pool_error
+
     with ProcessPoolExecutor(max_workers=concurrent_simulations) as executor:
-        while next_index < len(runs):
-            batch, next_index = select_batch(next_index)
-            for run in batch:
-                edit_run_status(int(run["runs_id"]), "running")
-            worker_results = executor.map(_execute_run, batch)
-            for worker_result in sorted(
-                worker_results,
-                key=lambda item: item["run_id"],
-            ):
-                process_result(worker_result)
+        current_statuses = _load_current_statuses(
+            [int(run["runs_id"]) for run in runs]
+        )
+        eligible_runs = []
+        for run in runs:
+            run_id = int(run["runs_id"])
+            if current_statuses.get(run_id, str(run["status"])) == "infeasible":
+                print(f"Skipping run {run_id}: already infeasible")
+                continue
+            eligible_runs.append(run)
+
+        baseline_runs = [
+            run for run in eligible_runs
+            if not bool(run["leader_failure_enabled"])
+        ]
+        fail_runs = [
+            run for run in eligible_runs
+            if bool(run["leader_failure_enabled"])
+        ]
+        run_phase(baseline_runs, executor)
+
+        fail_statuses = _load_current_statuses(
+            [int(run["runs_id"]) for run in fail_runs]
+        )
+        eligible_fail_runs = []
+        for run in fail_runs:
+            run_id = int(run["runs_id"])
+            if fail_statuses.get(run_id, str(run["status"])) == "infeasible":
+                print(f"Skipping run {run_id}: already infeasible")
+                continue
+            eligible_fail_runs.append(run)
+        run_phase(eligible_fail_runs, executor)
 
     merge_fail_data()
     merge_nonfail_data()

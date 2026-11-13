@@ -21,7 +21,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             number_of_drones=len(drones),
             formation_type="leader_follower",
             shape="grid",
-            spread=1.0,
+            spread=3.0,
             plane="yz",
             leader_index=initial_leader,
             leader_position=leader_start,
@@ -36,7 +36,7 @@ class TestSimRunnerLeaderPromotionLine(unittest.TestCase):
             velocity=leader_speed,
             time=simulation_time,
             initial_heading=leader_heading,
-            print_waypoints=True,
+            print_waypoints=False,
             seed=None,
         )
 

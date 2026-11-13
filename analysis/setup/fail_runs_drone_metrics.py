@@ -1,6 +1,9 @@
 """Create and append per-drone failed-run analysis metrics."""
 
 from pathlib import Path
+from numbers import Integral
+
+import duckdb
 
 try:
     from experiments.setup.common import DATABASE_PATH, connect_database
@@ -29,12 +32,12 @@ FAIL_RUNS_DRONE_METRICS_COLUMNS = [
     "peak_error_time",
     "error_integral",
     "final_error",
-    "status_005",
-    "time_to_match_005",
-    "excursions_005",
-    "status_0001",
-    "time_to_match_0001",
-    "excursions_0001",
+    "status_01",
+    "time_to_match_01",
+    "excursions_01",
+    "status_002",
+    "time_to_match_002",
+    "excursions_002",
 ]
 
 
@@ -55,12 +58,12 @@ def _create_table(connection) -> None:
             peak_error_time DOUBLE,
             error_integral DOUBLE,
             final_error DOUBLE,
-            status_005 VARCHAR,
-            time_to_match_005 DOUBLE,
-            excursions_005 BIGINT,
-            status_0001 VARCHAR,
-            time_to_match_0001 DOUBLE,
-            excursions_0001 BIGINT
+            status_01 VARCHAR,
+            time_to_match_01 DOUBLE,
+            excursions_01 BIGINT,
+            status_002 VARCHAR,
+            time_to_match_002 DOUBLE,
+            excursions_002 BIGINT
         )
         """
     )
@@ -90,59 +93,72 @@ def data_input(
     peak_error_time: float,
     error_integral: float,
     final_error: float,
-    status_005: str,
-    time_to_match_005: float | None,
-    excursions_005: int,
-    status_0001: str,
-    time_to_match_0001: float | None,
-    excursions_0001: int,
+    status_01: str,
+    time_to_match_01: float | None,
+    excursions_01: int | None,
+    status_002: str,
+    time_to_match_002: float | None,
+    excursions_002: int | None,
     output_path: str | Path = DEFAULT_DATABASE,
+    connection: duckdb.DuckDBPyConnection | None = None,
 ) -> Path:
     """Append one per-drone failed-run metrics row."""
     required_integers = (
         run_id,
         baseline_nonfail_run_id,
         drone,
-        excursions_005,
-        excursions_0001,
     )
     optional_integers = (reference_drone, distance_rank_at_change)
     if any(
-        isinstance(value, bool) or not isinstance(value, int)
+        isinstance(value, bool) or not isinstance(value, Integral)
         for value in required_integers
     ):
-        raise TypeError(
-            "run IDs, drone IDs, and excursion counts must be integers."
-        )
+        raise TypeError("run IDs and drone IDs must be integers.")
     if any(
         value is not None
-        and (isinstance(value, bool) or not isinstance(value, int))
+        and (isinstance(value, bool) or not isinstance(value, Integral))
+        for value in (excursions_01, excursions_002)
+    ):
+        raise TypeError("Excursion counts must be integers or None.")
+    if any(
+        value is not None
+        and (isinstance(value, bool) or not isinstance(value, Integral))
         for value in optional_integers
     ):
         raise TypeError("reference_drone and distance rank must be integers or None.")
 
     values = [
-        run_id,
-        baseline_nonfail_run_id,
-        drone,
+        int(run_id),
+        int(baseline_nonfail_run_id),
+        int(drone),
         role,
-        reference_drone,
+        None if reference_drone is None else int(reference_drone),
         distance_to_old_leader_at_change,
-        distance_rank_at_change,
+        None if distance_rank_at_change is None else int(distance_rank_at_change),
         mean_error,
         rms_error,
         peak_error,
         peak_error_time,
         error_integral,
         final_error,
-        status_005,
-        time_to_match_005,
-        excursions_005,
-        status_0001,
-        time_to_match_0001,
-        excursions_0001,
+        status_01,
+        time_to_match_01,
+        None if excursions_01 is None else int(excursions_01),
+        status_002,
+        time_to_match_002,
+        None if excursions_002 is None else int(excursions_002),
     ]
-    with connect_database() as connection:
+    if connection is None:
+        with connect_database() as connection:
+            _create_table(connection)
+            connection.execute(
+                f"""
+                INSERT INTO {FAIL_RUNS_DRONE_METRICS_TABLE}
+                VALUES ({", ".join("?" for _ in values)})
+                """,
+                values,
+            )
+    else:
         _create_table(connection)
         connection.execute(
             f"""

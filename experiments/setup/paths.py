@@ -39,7 +39,7 @@ DEFAULT_PATH_VALUES: dict[str, Sequence[object]] = {
     "first_waypoint_z": (1.0,),
     "velocity": (1.0,),
     "time": (10.0,),
-    "seed": tuple(range(1, 11)), # ----------> Adjust number of seed here (max + 1) <----------
+    "seed": tuple(range(1, 101)), # ----------> Adjust number of seed here (max + 1) <----------
     "initial_heading": (0.0,),
 }
 PATHS_TABLE = "registry.paths"

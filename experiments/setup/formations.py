@@ -70,8 +70,10 @@ def generate_formations(
     for plane in planes:
         validate_choice(plane, FORMATION_PLANES, "plane")
     for spread in spreads:
-        if spread <= 0 or spread not in DEFAULT_SPREADS:
-            raise ValueError("spreads must use values from 1.0 to 3.0 in 0.5 steps.")
+        if isinstance(spread, bool) or not isinstance(spread, (int, float)):
+            raise TypeError("spreads must contain numbers.")
+        if spread <= 0:
+            raise ValueError("spreads must contain positive values.")
 
     rows: list[dict[str, object]] = []
     formation_id = 1

@@ -29,11 +29,14 @@ RUN_COLUMNS = [
 ]
 ELECTION_TYPES = ("closest", "minimum_travel", "smallest_id", "central")
 RUN_STATUSES = ("planned", "running", "done", "failed", "infeasible", "cancelled")
-FAIL_TIMES = tuple(2.5 + 0.5 * index for index in range(11))
+# FAIL_TIMES = tuple(2.5 + 0.5 * index for index in range(6))
+FAIL_TIMES = (3.0,)
 DEFAULT_DATABASE = DATABASE_PATH
 
 
-_RUN_SELECT = """
+_FAIL_TIMES_SQL = ", ".join(f"({fail_time})" for fail_time in FAIL_TIMES)
+_ELECTION_TYPES_SQL = ", ".join(f"('{election_type}')" for election_type in ELECTION_TYPES)
+_RUN_SELECT = f"""
 WITH path_ids AS (
     SELECT DISTINCT CAST(path_id AS BIGINT) AS path_id
     FROM registry.paths
@@ -68,10 +71,8 @@ run_rows AS (
         'planned' AS status,
         1 AS row_order
     FROM combinations
-    CROSS JOIN (SELECT range / 2.0 AS fail_time FROM range(5, 16)) AS fail_times
-    CROSS JOIN (
-        VALUES ('closest'), ('minimum_travel'), ('smallest_id'), ('central')
-    ) AS election_types(election_type)
+    CROSS JOIN (VALUES {_FAIL_TIMES_SQL}) AS fail_times(fail_time)
+    CROSS JOIN (VALUES {_ELECTION_TYPES_SQL}) AS election_types(election_type)
 )
 SELECT
     ROW_NUMBER() OVER (

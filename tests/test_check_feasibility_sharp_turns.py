@@ -9,7 +9,7 @@ from rotorpy.trajectories.minsnap import MinSnap
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from analysis.run_analysis.check_feasibility import check_feasibility
+from analysis.per_run_analysis.check_feasibility import check_feasibility
 from formation.formation_maker import make_formation
 from simulation.sim_runner import run_simulation
 
