@@ -245,8 +245,9 @@ def _run_simulation(
 			controller at every timestamp to a timestamped CSV file.
 
 	Returns:
-		A dictionary containing time, positions, rotations, wind, leader history,
-		failure history, promotion time, and run-result metadata.
+		A dictionary containing time, positions, velocities, angular velocities,
+		quaternions, rotations, wind, leader history, failure history, promotion
+		time, and run-result metadata.
 
 	Raises:
 		ValueError: If the inputs are inconsistent or the election returns an
@@ -307,6 +308,7 @@ def _run_simulation(
 	formation_coordinates: dict[Drone, tuple[float, float, float]] = {}
 	formation_frame = None
 	initial_path_flat = leader_path.update(0.0)
+	leader_path_history = [dict(initial_path_flat)] if print_path else None
 	if route_aligned_formation:
 		formation_frame = _route_frame(initial_path_flat["x_dot"])
 		initial_forward, initial_lateral, initial_vertical = formation_frame
@@ -341,6 +343,8 @@ def _run_simulation(
 	dt = 1.0 / sim_rate
 	time_history = np.arange(num_steps, dtype=float) * dt
 	position_history = np.zeros((num_steps, len(drones), 3))
+	velocity_history = np.zeros((num_steps, len(drones), 3))
+	angular_velocity_history = np.zeros((num_steps, len(drones), 3))
 	quat_history = np.zeros((num_steps, len(drones), 4))
 	wind_history = np.zeros((num_steps, len(drones), 3))
 	travel_distance_history = np.zeros((num_steps, len(drones)))
@@ -354,6 +358,8 @@ def _run_simulation(
 	for drone in drones:
 		index = drone_indices[drone]
 		position_history[0, index] = states[drone]["x"]
+		velocity_history[0, index] = states[drone]["v"]
+		angular_velocity_history[0, index] = states[drone]["w"]
 		quat_history[0, index] = states[drone]["q"]
 		wind_history[0, index] = states[drone]["wind"]
 
@@ -425,6 +431,8 @@ def _run_simulation(
 			intended_position_history[step] = intended_position_history[step - 1]
 
 		path_flat = leader_path.update(time)
+		if leader_path_history is not None:
+			leader_path_history.append(dict(path_flat))
 		if route_aligned_formation:
 			formation_frame = _route_frame(
 				path_flat["x_dot"],
@@ -459,6 +467,8 @@ def _run_simulation(
 			index = drone_indices[drone]
 			if drone in failed_drones:
 				position_history[step, index] = np.nan
+				velocity_history[step, index] = np.nan
+				angular_velocity_history[step, index] = np.nan
 				travel_distance_history[step, index] = (
 					travel_distance_history[step - 1, index]
 				)
@@ -476,6 +486,8 @@ def _run_simulation(
 				dt,
 			)
 			position_history[step, index] = states[drone]["x"]
+			velocity_history[step, index] = states[drone]["v"]
+			angular_velocity_history[step, index] = states[drone]["w"]
 			travel_distance_history[step, index] = (
 				travel_distance_history[step - 1, index]
 				+ np.linalg.norm(
@@ -502,7 +514,10 @@ def _run_simulation(
 			active_leader if promotion_time is not None else None
 		),
 		"positions": position_history,
+		"velocities": velocity_history,
+		"angular_velocities": angular_velocity_history,
 		"travel_distances": travel_distance_history,
+		"quaternions": quat_history,
 		"rotations": rotation_history,
 		"wind": wind_history,
 		"leader_history": leader_history,
@@ -531,6 +546,7 @@ def _run_simulation(
 			time_history,
 			drones,
 			output_filename=print_path_filename,
+			leader_path_history=leader_path_history,
 		)
 		console_print(f"Intended path data saved to {path_data_path}")
 

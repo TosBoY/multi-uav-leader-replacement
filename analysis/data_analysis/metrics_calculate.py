@@ -1,6 +1,14 @@
 """Calculate and store metrics for completed leader-failure runs."""
 
+import os
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
 from collections.abc import Iterable
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
+from concurrent.futures.process import BrokenProcessPool
 from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
@@ -9,6 +17,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
+
+try:
+    import psutil
+except ModuleNotFoundError:
+    psutil = None
 
 try:
     from analysis.setup.fail_runs_drone_metrics import (
@@ -47,6 +60,7 @@ TOL_LOOSE_M = 0.1
 TOL_TIGHT_M = 0.02
 SAFETY_DISTANCE_M = 0.5
 BATCH_RUNS = 50
+CHUNK_RUNS = 25
 POSITION_COLUMNS = ("x", "y", "z")
 REQUIRED_COLUMNS = {"timestamp", "drone", *POSITION_COLUMNS}
 
@@ -473,6 +487,160 @@ def _aggregate_run(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _compute_run(
+    run: dict[str, Any],
+    baseline: dict[str, Any],
+    failure: pd.DataFrame,
+    baseline_data: pd.DataFrame,
+    baseline_separation_cache: dict[
+        tuple[int, float], tuple[float | None, float | None, int]
+    ],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Compute all metrics for one run without database access."""
+    run = dict(run)
+    run_id = int(run["run_id"])
+    run["fail_time"] = float(run["fail_time"])
+    run["number_of_drone"] = int(run["number_of_drone"])
+    old_leader = int(baseline["init_leader"])
+    change_time = _actual_change_time(failure, old_leader)
+    last_time = min(
+        float(failure["timestamp"].max()),
+        float(baseline_data["timestamp"].max()),
+    )
+    if last_time < change_time + WINDOW_S - 1e-9:
+        raise ValueError(
+            f"data ends at t={last_time:g}, before the required "
+            f"window end t={change_time + WINDOW_S:g}."
+        )
+    if run["promoted_leader"] is None:
+        raise ValueError("the result has no promoted leader.")
+    promoted_leader = int(run["promoted_leader"])
+    survivors = sorted(
+        int(drone)
+        for drone in failure["drone"].unique()
+        if int(drone) != old_leader
+    )
+    if len(survivors) + 1 != run["number_of_drone"]:
+        raise ValueError(
+            f"expected {run['number_of_drone'] - 1} survivors, "
+            f"found {len(survivors)}."
+        )
+    if promoted_leader not in survivors:
+        raise ValueError(
+            f"promoted leader {promoted_leader} is not among "
+            f"surviving drones {survivors}."
+        )
+    positions_before_change = {
+        drone: _position_before(failure, drone, change_time)
+        for drone in [old_leader, *survivors]
+    }
+    drone_rows = [
+        _drone_row(
+            run,
+            baseline,
+            failure,
+            baseline_data,
+            drone,
+            promoted_leader,
+            old_leader,
+            survivors,
+            change_time,
+            positions_before_change,
+        )
+        for drone in survivors
+    ]
+    sample_counts = {
+        int(row["_window_sample_count"]) for row in drone_rows
+    }
+    if len(sample_counts) != 1:
+        raise ValueError(
+            f"survivors have inconsistent window sample counts: "
+            f"{sorted(sample_counts)}."
+        )
+    _validate_drone_rows(drone_rows)
+    aggregate = _aggregate_run(drone_rows)
+    fail_separation = _distance_metrics(failure, survivors, change_time)
+    separation_key = (int(baseline["run_id"]), change_time)
+    if separation_key not in baseline_separation_cache:
+        baseline_separation_cache[separation_key] = _distance_metrics(
+            baseline_data, survivors, change_time
+        )
+    baseline_separation = baseline_separation_cache[separation_key]
+    aggregate.update(
+        {
+            "number_of_drone": run["number_of_drone"],
+            "shape": run["shape"],
+            "spread": run["spread"],
+            "plane": run["plane"],
+            "election_type": run["election_type"],
+            "fail_time": run["fail_time"],
+            "promoted_leader": promoted_leader,
+            "min_separation": fail_separation[0],
+            "min_separation_time": fail_separation[1],
+            "baseline_min_separation": baseline_separation[0],
+            "n_close_steps": fail_separation[2],
+        }
+    )
+    for row in drone_rows:
+        row.pop("_window_sample_count")
+    return drone_rows, aggregate
+
+
+def _compute_chunk(task: dict[str, Any]) -> list[dict[str, Any]]:
+    """Compute one baseline group without database access."""
+    baseline = dict(task["baseline"])
+    runs = list(task["runs"])
+    try:
+        baseline_data = _read_baseline_data(
+            str(baseline["data_file"]),
+            int(baseline["run_id"]),
+        )
+    except Exception as error:
+        message = f"{type(error).__name__}: {error}"
+        return [
+            {"run_id": int(run["run_id"]), "ok": False, "message": message}
+            for run in runs
+        ]
+
+    baseline_separation_cache: dict[
+        tuple[int, float], tuple[float | None, float | None, int]
+    ] = {}
+    results: list[dict[str, Any]] = []
+    for run in runs:
+        failure: pd.DataFrame | None = None
+        try:
+            failure = _read_run_data(
+                str(run["data_file"]),
+                int(run["run_id"]),
+            )
+            drone_rows, aggregate = _compute_run(
+                run,
+                baseline,
+                failure,
+                baseline_data,
+                baseline_separation_cache,
+            )
+            results.append(
+                {
+                    "run_id": int(run["run_id"]),
+                    "ok": True,
+                    "drone_rows": drone_rows,
+                    "aggregate": aggregate,
+                }
+            )
+        except Exception as error:
+            results.append(
+                {
+                    "run_id": int(run["run_id"]),
+                    "ok": False,
+                    "message": f"{type(error).__name__}: {error}",
+                }
+            )
+        finally:
+            del failure
+    return results
+
+
 def _insert_batch(
     drone_rows: list[dict[str, Any]],
     run_rows: list[dict[str, Any]],
@@ -553,20 +721,30 @@ def _validate_drone_rows(rows: list[dict[str, Any]]) -> None:
             )
 
 
-def calculate_metrics() -> int:
+def calculate_metrics(workers: int | None = None) -> int:
     """Recreate both analysis tables and calculate all available metrics."""
     start_time = perf_counter()
+    if workers is None:
+        physical_cores = (
+            psutil.cpu_count(logical=False)
+            if psutil is not None
+            else None
+        )
+        physical_cores = physical_cores or os.cpu_count() or 1
+        workers = max(1, min(physical_cores - 1, 24))
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
+        raise ValueError("workers must be a positive integer or None.")
+
     make_fail_runs_drone_metrics_table()
     make_failed_runs_metrics_table()
     processed = 0
     pending_drone_rows: list[dict[str, Any]] = []
     pending_run_rows: list[dict[str, Any]] = []
-    baseline_separation_cache: dict[
-        tuple[int, float], tuple[float | None, float | None, int]
-    ] = {}
     skipped: list[tuple[int, str]] = []
     not_done = 0
     flush_error: Exception | None = None
+    pool_error: Exception | None = None
+    fatal_error: Exception | None = None
 
     def flush_pending() -> int:
         """Write pending rows and clear them only after a successful commit."""
@@ -578,125 +756,153 @@ def calculate_metrics() -> int:
         pending_run_rows.clear()
         return rows_to_write
 
+    def consume_results(results: list[dict[str, Any]]) -> bool:
+        """Add worker results and flush when the main-process batch is full."""
+        nonlocal processed, flush_error
+        for result in results:
+            run_id = int(result["run_id"])
+            if not result["ok"]:
+                message = str(result["message"])
+                skipped.append((run_id, message))
+                print(f"Skipped run {run_id}: {message}")
+                continue
+            pending_drone_rows.extend(result["drone_rows"])
+            pending_run_rows.append(result["aggregate"])
+            if len(pending_run_rows) >= BATCH_RUNS:
+                try:
+                    processed += flush_pending()
+                except Exception as error:
+                    flush_error = error
+                    print(
+                        "Failed to flush metrics batch: "
+                        f"{type(error).__name__}: {error}"
+                    )
+                    return False
+        return True
+
+    groups: dict[int, dict[str, Any]] = {}
     for raw_run in _load_runs():
         run_id = int(raw_run["run_id"])
+        if raw_run["outcome"] != "done" or not raw_run["data_file"]:
+            not_done += 1
+            continue
         try:
-            if raw_run["outcome"] != "done" or not raw_run["data_file"]:
-                not_done += 1
-                continue
-            run = dict(raw_run)
-            run["fail_time"] = float(run["fail_time"])
-            run["number_of_drone"] = int(run["number_of_drone"])
-            baseline = _baseline_for(run)
-            failure = _read_run_data(str(run["data_file"]), run_id)
-            baseline_data = _read_baseline_data(
-                baseline["data_file"], int(baseline["run_id"])
-            )
-            old_leader = int(baseline["init_leader"])
-            change_time = _actual_change_time(failure, old_leader)
-            last_time = min(
-                float(failure["timestamp"].max()),
-                float(baseline_data["timestamp"].max()),
-            )
-            if last_time < change_time + WINDOW_S - 1e-9:
-                raise ValueError(
-                    f"data ends at t={last_time:g}, before the required "
-                    f"window end t={change_time + WINDOW_S:g}."
-                )
-            if raw_run["promoted_leader"] is None:
-                raise ValueError("the result has no promoted leader.")
-            promoted_leader = int(raw_run["promoted_leader"])
-            survivors = sorted(
-                int(drone)
-                for drone in failure["drone"].unique()
-                if int(drone) != old_leader
-            )
-            if len(survivors) + 1 != run["number_of_drone"]:
-                raise ValueError(
-                    f"expected {run['number_of_drone'] - 1} survivors, "
-                    f"found {len(survivors)}."
-                )
-            if promoted_leader not in survivors:
-                raise ValueError(
-                    f"promoted leader {promoted_leader} is not among "
-                    f"surviving drones {survivors}."
-                )
-            positions_before_change = {
-                drone: _position_before(failure, drone, change_time)
-                for drone in [old_leader, *survivors]
-            }
-            drone_rows = [
-                _drone_row(
-                    run,
-                    baseline,
-                    failure,
-                    baseline_data,
-                    drone,
-                    promoted_leader,
-                    old_leader,
-                    survivors,
-                    change_time,
-                    positions_before_change,
-                )
-                for drone in survivors
-            ]
-            sample_counts = {
-                int(row["_window_sample_count"]) for row in drone_rows
-            }
-            if len(sample_counts) != 1:
-                raise ValueError(
-                    f"survivors have inconsistent window sample counts: "
-                    f"{sorted(sample_counts)}."
-                )
-            _validate_drone_rows(drone_rows)
-            aggregate = _aggregate_run(drone_rows)
-            fail_separation = _distance_metrics(
-                failure, survivors, change_time
-            )
-            separation_key = (baseline["run_id"], change_time)
-            if separation_key not in baseline_separation_cache:
-                baseline_separation_cache[separation_key] = _distance_metrics(
-                    baseline_data, survivors, change_time
-                )
-            baseline_separation = baseline_separation_cache[separation_key]
-            aggregate.update(
-                {
-                    "number_of_drone": run["number_of_drone"],
-                    "shape": run["shape"],
-                    "spread": run["spread"],
-                    "plane": run["plane"],
-                    "election_type": run["election_type"],
-                    "fail_time": run["fail_time"],
-                    "promoted_leader": promoted_leader,
-                    "min_separation": fail_separation[0],
-                    "min_separation_time": fail_separation[1],
-                    "baseline_min_separation": baseline_separation[0],
-                    "n_close_steps": fail_separation[2],
-                }
-            )
-            for row in drone_rows:
-                row.pop("_window_sample_count")
-            pending_drone_rows.extend(drone_rows)
-            pending_run_rows.append(aggregate)
+            baseline = _baseline_for(raw_run)
         except Exception as error:
             message = f"{type(error).__name__}: {error}"
             skipped.append((run_id, message))
             print(f"Skipped run {run_id}: {message}")
-        if len(pending_run_rows) >= BATCH_RUNS:
-            try:
-                processed += flush_pending()
-            except Exception as error:
-                message = f"{type(error).__name__}: {error}"
-                print(f"Failed to flush metrics batch: {message}")
-                flush_error = error
-                break
+            continue
+        run = {
+            "run_id": run_id,
+            "data_file": str(raw_run["data_file"]),
+            "fail_time": float(raw_run["fail_time"]),
+            "number_of_drone": int(raw_run["number_of_drone"]),
+            "promoted_leader": raw_run["promoted_leader"],
+            "shape": raw_run["shape"],
+            "spread": raw_run["spread"],
+            "plane": raw_run["plane"],
+            "election_type": raw_run["election_type"],
+        }
+        group = groups.setdefault(
+            int(baseline["run_id"]),
+            {"baseline": baseline, "runs": []},
+        )
+        group["runs"].append(run)
+
+    tasks: list[dict[str, Any]] = []
+    for group in groups.values():
+        group_runs = group["runs"]
+        for start in range(0, len(group_runs), CHUNK_RUNS):
+            tasks.append(
+                {
+                    "baseline": dict(group["baseline"]),
+                    "runs": group_runs[start:start + CHUNK_RUNS],
+                }
+            )
+
+    def mark_chunk_failed(task: dict[str, Any], error: Exception) -> None:
+        message = f"{type(error).__name__}: {error}"
+        for run in task["runs"]:
+            run_id = int(run["run_id"])
+            skipped.append((run_id, message))
+            print(f"Skipped run {run_id}: {message}")
+
+    executor: ProcessPoolExecutor | None = None
+    try:
+        if workers == 1:
+            for task in tasks:
+                if not consume_results(_compute_chunk(task)):
+                    break
+        else:
+            executor = ProcessPoolExecutor(max_workers=workers)
+            pending_tasks = iter(tasks)
+            futures: dict[Any, dict[str, Any]] = {}
+
+            def submit_next() -> bool:
+                nonlocal pool_error
+                try:
+                    task = next(pending_tasks)
+                except StopIteration:
+                    return False
+                try:
+                    futures[executor.submit(_compute_chunk, task)] = task
+                except Exception as error:
+                    pool_error = error
+                return True
+
+            for _ in range(min(workers * 2, len(tasks))):
+                if not submit_next() or pool_error is not None:
+                    break
+
+            while futures and flush_error is None:
+                completed, _ = wait(
+                    futures,
+                    return_when=FIRST_COMPLETED,
+                )
+                for future in as_completed(completed):
+                    task = futures.pop(future)
+                    try:
+                        results = future.result()
+                    except Exception as error:
+                        mark_chunk_failed(task, error)
+                        if isinstance(error, BrokenProcessPool):
+                            pool_error = error
+                    else:
+                        if not consume_results(results):
+                            break
+                    if (
+                        flush_error is None
+                        and pool_error is None
+                        and submit_next()
+                    ):
+                        continue
+                    if flush_error is not None or pool_error is not None:
+                        break
+                if flush_error is not None or pool_error is not None:
+                    break
+    except Exception as error:
+        fatal_error = error
+    finally:
+        if executor is not None:
+            cancel_futures = (
+                flush_error is not None or pool_error is not None
+            )
+            executor.shutdown(
+                wait=not cancel_futures,
+                cancel_futures=cancel_futures,
+            )
+
     if flush_error is None:
         try:
             processed += flush_pending()
         except Exception as error:
-            message = f"{type(error).__name__}: {error}"
-            print(f"Failed to flush final metrics batch: {message}")
             flush_error = error
+            print(
+                "Failed to flush final metrics batch: "
+                f"{type(error).__name__}: {error}"
+            )
+
     if skipped:
         print(f"Skipped {len(skipped)} runs:")
         for run_id, message in skipped:
@@ -707,6 +913,10 @@ def calculate_metrics() -> int:
     print(f"Finished metrics calculation in {_format_elapsed_time(elapsed_time)}.")
     if flush_error is not None:
         raise flush_error
+    if pool_error is not None:
+        raise pool_error
+    if fatal_error is not None:
+        raise fatal_error
     return processed
 
 

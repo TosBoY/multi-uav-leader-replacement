@@ -37,7 +37,7 @@ class TestSimRunnerSavedData(unittest.TestCase):
             time=self.simulation_time,
             initial_heading=0.0,
             print_waypoints=True,
-            seed=42,
+            seed=100,
         )
 
     def _run(self, leader_failure_time):

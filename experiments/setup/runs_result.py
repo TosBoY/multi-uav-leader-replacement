@@ -20,7 +20,6 @@ RESULT_COLUMNS = [
     "data_file",
     "n_steps",
     "promoted_leader",
-    "promotion_time",
 ]
 RESULT_OUTCOMES = ("done", "failed", "infeasible")
 DEFAULT_DATABASE = DATABASE_PATH
@@ -37,8 +36,7 @@ def make_runs_result_table(
             CREATE TABLE registry.runs_result (
                 run_id BIGINT, attempt BIGINT, outcome VARCHAR, error VARCHAR,
                 started_at VARCHAR, finished_at VARCHAR, duration DOUBLE,
-                data_file VARCHAR, n_steps BIGINT, promoted_leader VARCHAR,
-                promotion_time DOUBLE
+                data_file VARCHAR, n_steps BIGINT, promoted_leader VARCHAR
             )
             """
         )
@@ -68,7 +66,6 @@ def data_input(
     n_steps: int,
     data_file: str | Path | None = None,
     promoted_leader: int | str | None = None,
-    promotion_time: float | None = None,
     error: str | None = None,
     output_path: str | Path = DEFAULT_DATABASE,
 ) -> Path:
@@ -103,20 +100,19 @@ def data_input(
             CREATE TABLE IF NOT EXISTS registry.runs_result (
                 run_id BIGINT, attempt BIGINT, outcome VARCHAR, error VARCHAR,
                 started_at VARCHAR, finished_at VARCHAR, duration DOUBLE,
-                data_file VARCHAR, n_steps BIGINT, promoted_leader VARCHAR,
-                promotion_time DOUBLE
+                data_file VARCHAR, n_steps BIGINT, promoted_leader VARCHAR
             )
             """
         )
         connection.execute(
             """
             INSERT INTO registry.runs_result
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 run_id, attempt, outcome, error if outcome == "failed" else "",
                 started_value, finished_value, duration, data_file, n_steps,
-                promoted_leader, promotion_time,
+                promoted_leader,
             ],
         )
     return Path(output_path)

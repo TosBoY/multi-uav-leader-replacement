@@ -35,12 +35,12 @@ def save_simulation_data(
     drones = results["drones"]
     times = results["time"]
     positions = results["positions"]
-    rotations = results["rotations"]
-    wind = results["wind"]
+    velocities = results["velocities"]
+    angular_velocities = results["angular_velocities"]
+    quaternions = results["quaternions"]
     travel_distance_history = results["travel_distances"]
     leader_history = results["leader_history"]
     failed_history = results["failed_history"]
-    promotion_time = results["promotion_time"]
 
     time_values = np.asarray(times, dtype=float)
     drone_values = np.asarray(drones)
@@ -48,8 +48,12 @@ def save_simulation_data(
     repeated_leaders = np.repeat(np.asarray(leader_history), len(drone_values))
     tiled_drones = np.tile(drone_values, len(time_values))
     flat_positions = np.asarray(positions, dtype=float).reshape(-1, 3)
-    flat_rotations = np.asarray(rotations, dtype=float).reshape(-1, 3, 3)
-    flat_wind = np.asarray(wind, dtype=float).reshape(-1, 3)
+    flat_velocities = np.asarray(velocities, dtype=float).reshape(-1, 3)
+    flat_angular_velocities = np.asarray(
+        angular_velocities,
+        dtype=float,
+    ).reshape(-1, 3)
+    flat_quaternions = np.asarray(quaternions, dtype=float).reshape(-1, 4)
 
     frame = pd.DataFrame(
         {
@@ -60,22 +64,19 @@ def save_simulation_data(
             "x": flat_positions[:, 0],
             "y": flat_positions[:, 1],
             "z": flat_positions[:, 2],
-            "rotation_00": flat_rotations[:, 0, 0],
-            "rotation_01": flat_rotations[:, 0, 1],
-            "rotation_02": flat_rotations[:, 0, 2],
-            "rotation_10": flat_rotations[:, 1, 0],
-            "rotation_11": flat_rotations[:, 1, 1],
-            "rotation_12": flat_rotations[:, 1, 2],
-            "rotation_20": flat_rotations[:, 2, 0],
-            "rotation_21": flat_rotations[:, 2, 1],
-            "rotation_22": flat_rotations[:, 2, 2],
-            "wind_x": flat_wind[:, 0],
-            "wind_y": flat_wind[:, 1],
-            "wind_z": flat_wind[:, 2],
+            "v_x": flat_velocities[:, 0],
+            "v_y": flat_velocities[:, 1],
+            "v_z": flat_velocities[:, 2],
+            "w_x": flat_angular_velocities[:, 0],
+            "w_y": flat_angular_velocities[:, 1],
+            "w_z": flat_angular_velocities[:, 2],
+            "q_x": flat_quaternions[:, 0],
+            "q_y": flat_quaternions[:, 1],
+            "q_z": flat_quaternions[:, 2],
+            "q_w": flat_quaternions[:, 3],
             "travel_distance": np.asarray(
                 travel_distance_history, dtype=float
             ).reshape(-1),
-            "promotion_time": promotion_time,
         }
     )
 

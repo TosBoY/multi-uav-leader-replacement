@@ -10,12 +10,12 @@ except ImportError:
     from experiments.experiments_manager.experiment_manager import run_experiments
 
 
-RUN_ID_RANGE = [1, 200]
+RUN_ID_RANGE = [1, 20]
 NUMBER_OF_DRONE_RANGE = []
 SHAPE_RANGE = []
 
 """
-RUN_ID_RANGE = [1, 100]
+RUN_ID_RANGE = [1, 20]
 NUMBER_OF_DRONE_RANGE = [5, 6]
 SHAPE_RANGE = ["line_x", "sphere"]
 """

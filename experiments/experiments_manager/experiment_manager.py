@@ -8,12 +8,17 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 from collections.abc import Sequence
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
+from concurrent.futures.process import BrokenProcessPool
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any, cast
 
-CONCURRENT_SIMULATIONS = 8
+try:
+    import psutil
+except ModuleNotFoundError:
+    psutil = None
+
 PARQUET_MERGE_BATCH_SIZE = 10000
 
 
@@ -168,7 +173,6 @@ def _record_result(
         duration=float(result.get("duration", 0.0)),
         n_steps=int(result.get("n_steps", 0)),
         promoted_leader=result.get("promoted_leader"),
-        promotion_time=result.get("promotion_time"),
     )
 
 
@@ -234,7 +238,6 @@ def _execute_run(run: dict[str, Any]) -> dict[str, Any]:
             "duration": 0.0,
             "n_steps": 0,
             "promoted_leader": None,
-            "promotion_time": None,
         }
     return {
         "run_id": run_id,
@@ -249,22 +252,21 @@ def run_experiments(
     run_id_range: Sequence[int] | None = None,
     number_of_drone_range: Sequence[int] | None = None,
     shape_range: Sequence[str] | None = None,
-    concurrent_simulations: int = CONCURRENT_SIMULATIONS,
 ) -> list[dict[str, Any]]:
     """Run selected registry experiments in ascending ``run_id`` order.
 
     Empty or ``None`` filters select all values for that field. Numeric ranges
     with two values are inclusive; other numeric sequences select exact IDs.
-    ``concurrent_simulations`` controls the maximum number of worker processes.
+    Worker count is selected from the available physical CPU cores.
     """
-    if (
-        isinstance(concurrent_simulations, bool)
-        or not isinstance(concurrent_simulations, int)
-        or concurrent_simulations < 1
-    ):
-        raise ValueError("concurrent_simulations must be a positive integer.")
-
     start_time = perf_counter()
+    physical_cores = (
+        psutil.cpu_count(logical=False)
+        if psutil is not None
+        else None
+    )
+    physical_cores = physical_cores or os.cpu_count() or 1
+    worker_count = max(1, min(physical_cores - 1, 24))
     runs = _load_runs(run_id_range, number_of_drone_range, shape_range)
     if runs:
         print(
@@ -294,7 +296,7 @@ def run_experiments(
             nonfail_run_ids.clear()
 
     def process_result(worker_result: dict[str, Any]) -> None:
-        """Apply one completed worker result in run-ID order."""
+        """Apply one completed worker result in completion order."""
         run_id = int(worker_result["run_id"])
         failure_enabled = bool(worker_result["failure_enabled"])
         result = worker_result["result"]
@@ -368,11 +370,13 @@ def run_experiments(
             try:
                 futures[executor.submit(_execute_run, run)] = run
             except Exception as error:
+                _record_failed_exception(run_id, error, datetime.now())
                 pool_error = error
                 print(f"Failed to submit run {run_id}: {error}")
             return True
 
-        for _ in range(min(concurrent_simulations, len(phase_runs))):
+        max_in_flight = worker_count * 2
+        for _ in range(min(max_in_flight, len(phase_runs))):
             if not submit_next() or pool_error is not None:
                 break
 
@@ -387,6 +391,8 @@ def run_experiments(
                 try:
                     worker_result = future.result()
                 except Exception as error:
+                    if isinstance(error, BrokenProcessPool):
+                        pool_error = error
                     _record_failed_exception(run_id, error, datetime.now())
                     print(f"Run {run_id} result: failed ({error})")
                     recorded_results.append(
@@ -403,42 +409,87 @@ def run_experiments(
         if pool_error is not None:
             raise pool_error
 
-    with ProcessPoolExecutor(max_workers=concurrent_simulations) as executor:
-        current_statuses = _load_current_statuses(
-            [int(run["runs_id"]) for run in runs]
-        )
-        eligible_runs = []
-        for run in runs:
-            run_id = int(run["runs_id"])
-            if current_statuses.get(run_id, str(run["status"])) == "infeasible":
-                print(f"Skipping run {run_id}: already infeasible")
-                continue
-            eligible_runs.append(run)
+    try:
+        with ProcessPoolExecutor(max_workers=worker_count) as executor:
+            current_statuses = _load_current_statuses(
+                [int(run["runs_id"]) for run in runs]
+            )
+            eligible_runs = []
+            for run in runs:
+                run_id = int(run["runs_id"])
+                if current_statuses.get(
+                    run_id, str(run["status"])
+                ) == "infeasible":
+                    print(f"Skipping run {run_id}: already infeasible")
+                    continue
+                eligible_runs.append(run)
 
-        baseline_runs = [
-            run for run in eligible_runs
-            if not bool(run["leader_failure_enabled"])
-        ]
-        fail_runs = [
-            run for run in eligible_runs
-            if bool(run["leader_failure_enabled"])
-        ]
-        run_phase(baseline_runs, executor)
+            baseline_runs = [
+                run for run in eligible_runs
+                if not bool(run["leader_failure_enabled"])
+            ]
+            fail_runs = [
+                run for run in eligible_runs
+                if bool(run["leader_failure_enabled"])
+            ]
+            run_phase(baseline_runs, executor)
 
-        fail_statuses = _load_current_statuses(
-            [int(run["runs_id"]) for run in fail_runs]
-        )
-        eligible_fail_runs = []
-        for run in fail_runs:
-            run_id = int(run["runs_id"])
-            if fail_statuses.get(run_id, str(run["status"])) == "infeasible":
-                print(f"Skipping run {run_id}: already infeasible")
-                continue
-            eligible_fail_runs.append(run)
-        run_phase(eligible_fail_runs, executor)
+            baseline_ids: dict[int, int | None] = {}
+            with connect_database() as connection:
+                for run in fail_runs:
+                    baseline = connection.execute(
+                        """
+                        SELECT runs_id
+                        FROM registry.runs
+                        WHERE path_id = ?
+                          AND formation_id = ?
+                          AND init_leader = ?
+                          AND NOT leader_failure_enabled
+                        ORDER BY runs_id
+                        LIMIT 1
+                        """,
+                        [
+                            run["path_id"],
+                            run["formation_id"],
+                            run["init_leader"],
+                        ],
+                    ).fetchone()
+                    baseline_ids[int(run["runs_id"])] = (
+                        None if baseline is None else int(baseline[0])
+                    )
 
-    merge_fail_data()
-    merge_nonfail_data()
+            baseline_statuses = _load_current_statuses(
+                [
+                    baseline_id
+                    for baseline_id in baseline_ids.values()
+                    if baseline_id is not None
+                ]
+            )
+            eligible_fail_runs = []
+            for run in fail_runs:
+                run_id = int(run["runs_id"])
+                baseline_id = baseline_ids[run_id]
+                if baseline_id is None:
+                    print(f"Skipping run {run_id}: no baseline exists")
+                    continue
+                baseline_status = baseline_statuses.get(
+                    baseline_id,
+                    "unknown",
+                )
+                if baseline_status != "done":
+                    print(
+                        f"Skipping run {run_id}: baseline {baseline_id} "
+                        f"status is {baseline_status}"
+                    )
+                    continue
+                eligible_fail_runs.append(run)
+            run_phase(eligible_fail_runs, executor)
+    finally:
+        try:
+            merge_fail_data()
+        finally:
+            merge_nonfail_data()
+
     elapsed_time = perf_counter() - start_time
     print(f"Finished experiments in {_format_elapsed_time(elapsed_time)}.")
     return recorded_results
