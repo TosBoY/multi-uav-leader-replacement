@@ -63,6 +63,7 @@ BATCH_RUNS = 50
 CHUNK_RUNS = 25
 POSITION_COLUMNS = ("x", "y", "z")
 REQUIRED_COLUMNS = {"timestamp", "drone", *POSITION_COLUMNS}
+WORKERS: int | None = None
 
 
 def _format_elapsed_time(seconds: float) -> str:
@@ -723,19 +724,26 @@ def _validate_drone_rows(rows: list[dict[str, Any]]) -> None:
             )
 
 
-def calculate_metrics(workers: int | None = None) -> int:
-    """Recreate both analysis tables and calculate all available metrics."""
+def calculate_metrics() -> int:
+    """Recreate analysis tables and calculate metrics.
+
+    By default, one worker is created for each available physical CPU core.
+    Set ``WORKERS`` above to use a specific positive worker count.
+    """
     start_time = perf_counter()
-    if workers is None:
-        physical_cores = (
+    if WORKERS is None:
+        workers = (
             psutil.cpu_count(logical=False)
             if psutil is not None
             else None
         )
-        physical_cores = physical_cores or os.cpu_count() or 1
-        workers = max(1, min(physical_cores - 1, 24))
-    if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
+        workers = workers or os.cpu_count() or 1
+    elif isinstance(WORKERS, bool) or not isinstance(WORKERS, int):
         raise ValueError("workers must be a positive integer or None.")
+    else:
+        workers = WORKERS
+    if workers < 1:
+        raise ValueError("WORKERS must be a positive integer or None.")
 
     make_fail_runs_drone_metrics_table()
     make_failed_runs_metrics_table()

@@ -20,6 +20,7 @@ except ModuleNotFoundError:
     psutil = None
 
 PARQUET_MERGE_BATCH_SIZE = 10000
+WORKERS: int | None = None
 
 
 def _format_elapsed_time(seconds: float) -> str:
@@ -284,17 +285,24 @@ def run_experiments(
 
     Empty or ``None`` filters select all values for that field. Numeric ranges
     with two values are inclusive; other numeric sequences select exact values.
-    String filters select the listed values. Worker count is selected from the
-    available physical CPU cores.
+    String filters select the listed values. By default, one worker is
+    created for each available physical CPU core. Set ``WORKERS`` above to
+    use a specific positive worker count.
     """
     start_time = perf_counter()
-    physical_cores = (
-        psutil.cpu_count(logical=False)
-        if psutil is not None
-        else None
-    )
-    physical_cores = physical_cores or os.cpu_count() or 1
-    worker_count = max(1, min(physical_cores - 1, 24))
+    if WORKERS is None:
+        worker_count = (
+            psutil.cpu_count(logical=False)
+            if psutil is not None
+            else None
+        )
+        worker_count = worker_count or os.cpu_count() or 1
+    else:
+        if isinstance(WORKERS, bool) or not isinstance(WORKERS, int):
+            raise ValueError("WORKERS must be a positive integer or None.")
+        if WORKERS < 1:
+            raise ValueError("WORKERS must be a positive integer or None.")
+        worker_count = WORKERS
     runs = _load_runs(
         run_id_range,
         path_id_range,
