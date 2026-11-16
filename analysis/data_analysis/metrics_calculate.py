@@ -429,6 +429,7 @@ def _drone_row(
     )
     return {
         "run_id": run["run_id"],
+        "path_id": run["path_id"],
         "baseline_nonfail_run_id": baseline["run_id"],
         "drone": drone,
         "_window_sample_count": len(times),
@@ -456,6 +457,7 @@ def _aggregate_run(rows: list[dict[str, Any]]) -> dict[str, Any]:
     peak = max(rows, key=lambda row: (row["peak_error"], -row["drone"]))
     result: dict[str, Any] = {
         "run_id": rows[0]["run_id"],
+        "path_id": rows[0]["path_id"],
         "baseline_nonfail_run_id": rows[0]["baseline_nonfail_run_id"],
         "number_of_drone": len(rows) + 1,
         "mean_error": float(np.mean([row["mean_error"] for row in rows])),
@@ -795,6 +797,7 @@ def calculate_metrics(workers: int | None = None) -> int:
             continue
         run = {
             "run_id": run_id,
+            "path_id": int(raw_run["path_id"]),
             "data_file": str(raw_run["data_file"]),
             "fail_time": float(raw_run["fail_time"]),
             "number_of_drone": int(raw_run["number_of_drone"]),

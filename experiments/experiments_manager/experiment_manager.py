@@ -61,7 +61,7 @@ except ModuleNotFoundError:
 
 
 def _range_filter(
-    value: Sequence[int] | None,
+    value: Sequence[int | float] | None,
     column: str,
     parameters: list[Any],
 ) -> str:
@@ -88,20 +88,42 @@ def _shape_filter(
     return f" AND f.shape IN ({placeholders})"
 
 
+def _plane_filter(
+    planes: Sequence[str] | None,
+    parameters: list[Any],
+) -> str:
+    """Build a plane filter; an empty input means all planes."""
+    if planes is None or len(planes) == 0:
+        return ""
+    parameters.extend(planes)
+    placeholders = ", ".join("?" for _ in planes)
+    return f" AND f.plane IN ({placeholders})"
+
+
 def _load_runs(
     run_id_range: Sequence[int] | None,
+    path_id_range: Sequence[int] | None,
     number_of_drone_range: Sequence[int] | None,
     shape_range: Sequence[str] | None,
+    plane_range: Sequence[str] | None,
+    spread_range: Sequence[float] | None,
+    nonfail_only: bool,
 ) -> list[dict[str, Any]]:
     """Load filtered run configurations in ascending run-ID order."""
+    if not isinstance(nonfail_only, bool):
+        raise TypeError("nonfail_only must be a boolean.")
     parameters: list[Any] = []
     filters = "".join(
         (
             _range_filter(run_id_range, "r.runs_id", parameters),
+            _range_filter(path_id_range, "r.path_id", parameters),
             _range_filter(number_of_drone_range, "f.number_of_drone", parameters),
             _shape_filter(shape_range, parameters),
+            _plane_filter(plane_range, parameters),
+            _range_filter(spread_range, "f.spread", parameters),
         )
     )
+    failure_filter = " AND NOT r.leader_failure_enabled" if nonfail_only else ""
     query = f"""
         SELECT
             r.runs_id,
@@ -132,6 +154,7 @@ def _load_runs(
             ON r.path_id = p.path_id
         WHERE TRUE
         {filters}
+        {failure_filter}
         ORDER BY r.runs_id
     """
     with connect_database() as connection:
@@ -252,12 +275,17 @@ def run_experiments(
     run_id_range: Sequence[int] | None = None,
     number_of_drone_range: Sequence[int] | None = None,
     shape_range: Sequence[str] | None = None,
+    path_id_range: Sequence[int] | None = None,
+    plane_range: Sequence[str] | None = None,
+    spread_range: Sequence[float] | None = None,
+    nonfail_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Run selected registry experiments in ascending ``run_id`` order.
 
     Empty or ``None`` filters select all values for that field. Numeric ranges
-    with two values are inclusive; other numeric sequences select exact IDs.
-    Worker count is selected from the available physical CPU cores.
+    with two values are inclusive; other numeric sequences select exact values.
+    String filters select the listed values. Worker count is selected from the
+    available physical CPU cores.
     """
     start_time = perf_counter()
     physical_cores = (
@@ -267,13 +295,25 @@ def run_experiments(
     )
     physical_cores = physical_cores or os.cpu_count() or 1
     worker_count = max(1, min(physical_cores - 1, 24))
-    runs = _load_runs(run_id_range, number_of_drone_range, shape_range)
+    runs = _load_runs(
+        run_id_range,
+        path_id_range,
+        number_of_drone_range,
+        shape_range,
+        plane_range,
+        spread_range,
+        nonfail_only,
+    )
     if runs:
         print(
             f"Running {len(runs)} experiments "
             f"(run IDs {runs[0]['runs_id']}-{runs[-1]['runs_id']}, "
+            f"path IDs {path_id_range or 'all'}, "
             f"number of drones: {number_of_drone_range or 'all'}, "
-            f"shapes: {shape_range or 'all'})"
+            f"shapes: {shape_range or 'all'}, "
+            f"planes: {plane_range or 'all'}, "
+            f"spreads: {spread_range or 'all'}, "
+            f"nonfail only: {nonfail_only})"
         )
     else:
         print("No experiments match the selected range.")

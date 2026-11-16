@@ -1,0 +1,41 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run current Python file",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Initialize experiment registry",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "experiments.setup.setup_all",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Run experiment batch",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "experiments.experiments_manager.experiment_run",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Display registered experiment",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "experiments.experiments_manager.display_run",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}

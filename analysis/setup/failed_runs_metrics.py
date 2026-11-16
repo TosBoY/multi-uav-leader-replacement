@@ -20,6 +20,7 @@ DEFAULT_DATABASE = DATABASE_PATH
 FAILED_RUNS_METRICS_COLUMNS = [
     "run_id",
     "baseline_nonfail_run_id",
+    "path_id",
     "number_of_drone",
     "shape",
     "spread",
@@ -59,6 +60,7 @@ def _create_table(connection) -> None:
         CREATE TABLE IF NOT EXISTS {FAILED_RUNS_METRICS_TABLE} (
             run_id BIGINT,
             baseline_nonfail_run_id BIGINT,
+            path_id BIGINT,
             number_of_drone BIGINT,
             shape VARCHAR,
             spread DOUBLE,
@@ -108,6 +110,7 @@ def make_failed_runs_metrics_table(
 def data_input(
     run_id: int,
     baseline_nonfail_run_id: int,
+    path_id: int,
     number_of_drone: int,
     shape: str,
     spread: float,
@@ -145,6 +148,7 @@ def data_input(
     integer_values = (
         run_id,
         baseline_nonfail_run_id,
+        path_id,
         number_of_drone,
         n_matched_01,
         n_never_matched_01,
@@ -161,7 +165,8 @@ def data_input(
         raise TypeError("run IDs, drone counts, and metric counts must be integers.")
 
     values = [
-        run_id, baseline_nonfail_run_id, number_of_drone, shape, spread, plane,
+        run_id, baseline_nonfail_run_id, path_id, number_of_drone, shape,
+        spread, plane,
         election_type, fail_time, str(promoted_leader), mean_error, peak_error,
         peak_error_time, error_integral_sum, final_error_max, n_matched_01,
         n_never_matched_01, n_unstable_01, time_to_match_mean_01,
