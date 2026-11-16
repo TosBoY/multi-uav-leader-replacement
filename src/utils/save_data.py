@@ -88,5 +88,10 @@ def save_simulation_data(
     else:
         destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    frame.to_parquet(destination, index=False)
+    frame.to_parquet(
+        destination,
+        index=False,
+        compression="zstd",
+        compression_level=5,
+    )
     return destination

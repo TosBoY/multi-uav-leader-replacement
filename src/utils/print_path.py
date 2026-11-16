@@ -83,5 +83,10 @@ def print_path(
                 raise ValueError(
                     f"leader_path_history field {field!r} must be a scalar or 3D vector."
                 )
-    frame.to_parquet(destination, index=False)
+    frame.to_parquet(
+        destination,
+        index=False,
+        compression="zstd",
+        compression_level=5,
+    )
     return destination
