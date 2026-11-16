@@ -5,7 +5,7 @@ from collections.abc import Sequence
 import numpy as np
 
 
-TURN_ANGLE_SCALE = 0.5
+TURN_ANGLE_SCALE = 0.75
 
 
 def generate_random_waypoints(
