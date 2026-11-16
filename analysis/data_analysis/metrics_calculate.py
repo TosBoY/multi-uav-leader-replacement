@@ -64,6 +64,7 @@ CHUNK_RUNS = 25
 POSITION_COLUMNS = ("x", "y", "z")
 REQUIRED_COLUMNS = {"timestamp", "drone", *POSITION_COLUMNS}
 WORKERS: int | None = None
+WINDOWS_MAX_WORKERS = 61
 
 
 def _format_elapsed_time(seconds: float) -> str:
@@ -744,6 +745,14 @@ def calculate_metrics() -> int:
         workers = WORKERS
     if workers < 1:
         raise ValueError("WORKERS must be a positive integer or None.")
+    if os.name == "nt" and workers > WINDOWS_MAX_WORKERS:
+        if WORKERS is None:
+            workers = WINDOWS_MAX_WORKERS
+        else:
+            raise ValueError(
+                f"Windows supports at most {WINDOWS_MAX_WORKERS} "
+                "ProcessPoolExecutor workers."
+            )
 
     make_fail_runs_drone_metrics_table()
     make_failed_runs_metrics_table()

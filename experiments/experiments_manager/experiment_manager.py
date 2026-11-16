@@ -21,6 +21,7 @@ except ModuleNotFoundError:
 
 PARQUET_MERGE_BATCH_SIZE = 10000
 WORKERS: int | None = None
+WINDOWS_MAX_WORKERS = 61
 
 
 def _format_elapsed_time(seconds: float) -> str:
@@ -303,6 +304,14 @@ def run_experiments(
         if WORKERS < 1:
             raise ValueError("WORKERS must be a positive integer or None.")
         worker_count = WORKERS
+    if os.name == "nt" and worker_count > WINDOWS_MAX_WORKERS:
+        if WORKERS is None:
+            worker_count = WINDOWS_MAX_WORKERS
+        else:
+            raise ValueError(
+                f"Windows supports at most {WINDOWS_MAX_WORKERS} "
+                "ProcessPoolExecutor workers."
+            )
     runs = _load_runs(
         run_id_range,
         path_id_range,
