@@ -5,6 +5,9 @@ from collections.abc import Sequence
 import numpy as np
 
 
+TURN_ANGLE_SCALE = 0.5
+
+
 def generate_random_waypoints(
     first_waypoint: Sequence[float] | np.ndarray,
     velocity: float | Sequence[float] | np.ndarray,
@@ -76,7 +79,9 @@ def generate_random_waypoints(
     length = step_count + 1
     path_distance = travel_distance * generator.uniform(1.0, 1.25)
     step_length = path_distance / step_count
-    maximum_turn = np.pi / np.sqrt(step_count)
+    maximum_turn = (
+        TURN_ANGLE_SCALE * np.pi / np.sqrt(step_count)
+    )
 
     waypoints = np.empty((length, 3), dtype=float)
     waypoints[0] = starting_point

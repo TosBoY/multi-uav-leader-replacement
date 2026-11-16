@@ -10,13 +10,14 @@ except ImportError:
     from experiments.experiments_manager.experiment_manager import run_experiments
 
 
-RUN_ID_RANGE = []
-PATH_ID_RANGE = [1, 100]
-NUMBER_OF_DRONE_RANGE = [5]
-SHAPE_RANGE = ["arrow"]
-PLANE_RANGE = ["xy"]
-SPREAD_RANGE = [1.0]
-NONFAIL_ONLY = True
+# RUN_ID_RANGE = [1, 10]
+RUN_ID_RANGE = [11, 20]
+PATH_ID_RANGE = []
+NUMBER_OF_DRONE_RANGE = []
+SHAPE_RANGE = []
+PLANE_RANGE = []
+SPREAD_RANGE = []
+NONFAIL_ONLY = False
 
 """
 RUN_ID_RANGE = [1, 200]
