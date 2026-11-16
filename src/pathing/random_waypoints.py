@@ -68,7 +68,7 @@ def generate_random_waypoints(
         return waypoints
 
     generator = np.random.default_rng(seed)
-    minimum_steps = 2
+    minimum_steps = 4
     maximum_steps = max(minimum_steps, int(np.ceil(travel_distance)))
     step_count = int(
         generator.integers(minimum_steps, maximum_steps + 1)
