@@ -11,7 +11,7 @@ except ImportError:
 
 
 # RUN_ID_RANGE = [1, 10]
-RUN_ID_RANGE = [11, 20]
+RUN_ID_RANGE = [1, 200]
 PATH_ID_RANGE = []
 NUMBER_OF_DRONE_RANGE = []
 SHAPE_RANGE = []
