@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import sys
+from time import perf_counter
 
 try:
     from .experiment_manager import run_experiments
@@ -19,6 +20,22 @@ SHAPE_RANGE = []
 PLANE_RANGE = []
 SPREAD_RANGE = []
 NONFAIL_ONLY = False
+
+
+def _format_elapsed_time(seconds: float) -> str:
+    """Format elapsed seconds as days, hours, minutes, and seconds."""
+    whole_seconds = int(seconds)
+    days, remainder = divmod(whole_seconds, 24 * 60 * 60)
+    hours, remainder = divmod(remainder, 60 * 60)
+    minutes, remaining_seconds = divmod(remainder, 60)
+
+    if days:
+        return f"{days}d {hours}h {minutes}m {remaining_seconds}s"
+    if hours:
+        return f"{hours}h {minutes}m {remaining_seconds}s"
+    if minutes:
+        return f"{minutes}m {remaining_seconds}s"
+    return f"{seconds:.2f}s"
 
 
 def _split_run_id_ranges(
@@ -50,16 +67,24 @@ NONFAIL_ONLY = False
 
 
 if __name__ == "__main__":
-    for run_id_range in _split_run_id_ranges(
-        RUN_ID_RANGE,
-        RUN_ID_BATCH_LIMIT,
-    ):
-        run_experiments(
-            run_id_range=run_id_range,
-            path_id_range=PATH_ID_RANGE,
-            number_of_drone_range=NUMBER_OF_DRONE_RANGE,
-            shape_range=SHAPE_RANGE,
-            plane_range=PLANE_RANGE,
-            spread_range=SPREAD_RANGE,
-            nonfail_only=NONFAIL_ONLY,
+    start_time = perf_counter()
+    try:
+        for run_id_range in _split_run_id_ranges(
+            RUN_ID_RANGE,
+            RUN_ID_BATCH_LIMIT,
+        ):
+            run_experiments(
+                run_id_range=run_id_range,
+                path_id_range=PATH_ID_RANGE,
+                number_of_drone_range=NUMBER_OF_DRONE_RANGE,
+                shape_range=SHAPE_RANGE,
+                plane_range=PLANE_RANGE,
+                spread_range=SPREAD_RANGE,
+                nonfail_only=NONFAIL_ONLY,
+            )
+    finally:
+        elapsed_time = perf_counter() - start_time
+        print(
+            f"Finished all experiment batches in "
+            f"{_format_elapsed_time(elapsed_time)}."
         )

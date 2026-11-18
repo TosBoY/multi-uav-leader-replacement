@@ -11,7 +11,6 @@ from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_complete
 from concurrent.futures.process import BrokenProcessPool
 from datetime import datetime
 from pathlib import Path
-from time import perf_counter
 from typing import Any, cast
 
 try:
@@ -22,22 +21,6 @@ except ModuleNotFoundError:
 PARQUET_MERGE_BATCH_SIZE = 1000
 WORKERS: int | None = None
 WINDOWS_MAX_WORKERS = 61
-
-
-def _format_elapsed_time(seconds: float) -> str:
-    """Format elapsed seconds as days, hours, minutes, and seconds."""
-    whole_seconds = int(seconds)
-    days, remainder = divmod(whole_seconds, 24 * 60 * 60)
-    hours, remainder = divmod(remainder, 60 * 60)
-    minutes, remaining_seconds = divmod(remainder, 60)
-
-    if days:
-        return f"{days}d {hours}h {minutes}m {remaining_seconds}s"
-    if hours:
-        return f"{hours}h {minutes}m {remaining_seconds}s"
-    if minutes:
-        return f"{minutes}m {remaining_seconds}s"
-    return f"{seconds:.2f}s"
 
 
 try:
@@ -290,7 +273,6 @@ def run_experiments(
     created for each available physical CPU core. Set ``WORKERS`` above to
     use a specific positive worker count.
     """
-    start_time = perf_counter()
     if WORKERS is None:
         worker_count = (
             psutil.cpu_count(logical=False)
@@ -549,8 +531,6 @@ def run_experiments(
         finally:
             merge_nonfail_data()
 
-    elapsed_time = perf_counter() - start_time
-    print(f"Finished experiments in {_format_elapsed_time(elapsed_time)}.")
     return recorded_results
 
 
