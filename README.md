@@ -48,6 +48,10 @@ database after cloning.
 ### Windows PowerShell setup
 
 Install Git and Python 3.11 first, then run:
+- [VSCode](https://code.visualstudio.com/download)
+- [Git](https://git-scm.com/install/windows)
+- [Python 3.11.9](https://www.python.org/downloads/release/python-3119/)
+- [DBeaver](https://dbeaver.io/download/)
 
 ```powershell
 git clone https://github.com/TosBoY/multi-uav-leader-replacement.git
