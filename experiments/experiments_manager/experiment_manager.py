@@ -19,7 +19,7 @@ try:
 except ModuleNotFoundError:
     psutil = None
 
-PARQUET_MERGE_BATCH_SIZE = 5
+PARQUET_MERGE_BATCH_SIZE = 1000
 WORKERS: int | None = None
 WINDOWS_MAX_WORKERS = 61
 
