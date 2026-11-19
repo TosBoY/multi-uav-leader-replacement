@@ -71,10 +71,14 @@ def _create_table(connection) -> None:
 
 def make_fail_runs_drone_metrics_table(
     output_path: str | Path = DEFAULT_DATABASE,
+    reset: bool = False,
 ) -> Path:
-    """Create or replace the per-drone failed-run metrics table."""
+    """Create or reset the per-drone failed-run metrics table."""
     with connect_database() as connection:
-        connection.execute(f"DROP TABLE IF EXISTS {FAIL_RUNS_DRONE_METRICS_TABLE}")
+        if reset:
+            connection.execute(
+                f"DROP TABLE IF EXISTS {FAIL_RUNS_DRONE_METRICS_TABLE}"
+            )
         _create_table(connection)
     return Path(output_path)
 

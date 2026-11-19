@@ -98,11 +98,15 @@ def _create_table(connection) -> None:
 
 def make_failed_runs_metrics_table(
     output_path: str | Path = DEFAULT_DATABASE,
+    reset: bool = False,
 ) -> Path:
-    """Create or replace the empty failed-run metrics table."""
+    """Create or reset the failed-run metrics table."""
     with connect_database() as connection:
-        connection.execute("DROP TABLE IF EXISTS analysis.runs_metrics")
-        connection.execute(f"DROP TABLE IF EXISTS {FAILED_RUNS_METRICS_TABLE}")
+        if reset:
+            connection.execute("DROP TABLE IF EXISTS analysis.runs_metrics")
+            connection.execute(
+                f"DROP TABLE IF EXISTS {FAILED_RUNS_METRICS_TABLE}"
+            )
         _create_table(connection)
     return Path(output_path)
 

@@ -111,6 +111,21 @@ def _load_scenarios() -> list[dict[str, Any]]:
         return [dict(zip(columns, row)) for row in result.fetchall()]
 
 
+def _load_calculated_scenarios() -> set[tuple[int, float]]:
+    """Load path/failure-time scenarios with all configured windows present."""
+    with connect_database() as connection:
+        rows = connection.execute(
+            """
+            SELECT path_id, fail_time
+            FROM analysis.trajectory_difficulty
+            GROUP BY path_id, fail_time
+            HAVING COUNT(DISTINCT window_name) = ?
+            """,
+            [len(WINDOWS)],
+        ).fetchall()
+    return {(int(path_id), float(fail_time)) for path_id, fail_time in rows}
+
+
 def _relative_source_path(path: Path) -> str:
     """Return a stable project-relative path for a source file."""
     try:
@@ -296,7 +311,51 @@ def _add_difficulty_scores(
 
 def calculate_trajectory_difficulty() -> int:
     """Calculate and store all configured trajectory difficulty windows."""
+    make_trajectory_difficulty_table()
+    calculated_scenarios = _load_calculated_scenarios()
+    calculated_scenario_list = sorted(calculated_scenarios)
+    if calculated_scenario_list:
+        print(
+            "Already calculated trajectory scenarios: "
+            f"from "
+            f"{calculated_scenario_list[0]} "
+            f"to "
+            f"{calculated_scenario_list[-1]}"
+        )
+    else:
+        print("Already calculated trajectory scenarios: none")
     scenarios = _load_scenarios()
+    pending_scenarios = sorted(
+        [
+            scenario
+            for scenario in scenarios
+            if (
+                int(scenario["path_id"]),
+                float(scenario["fail_time"]),
+            ) not in calculated_scenarios
+        ],
+        key=lambda scenario: (
+            int(scenario["path_id"]),
+            float(scenario["fail_time"]),
+        ),
+    )
+    pending_scenario_keys = [
+        (int(scenario["path_id"]), float(scenario["fail_time"]))
+        for scenario in pending_scenarios
+    ]
+    if pending_scenario_keys:
+        print(
+            "Trajectory scenarios to calculate: "
+            "from "
+            f"{pending_scenario_keys[0]} "
+            "to "
+            f"{pending_scenario_keys[-1]}"
+        )
+    else:
+        print("Trajectory scenarios to calculate: none")
+    if not pending_scenarios:
+        print("No new trajectory scenarios to calculate.")
+        return 0
     trajectory_files = sorted(TRAJECTORY_DIRECTORY.glob("*.parquet"))
     if not trajectory_files:
         raise FileNotFoundError(
@@ -305,7 +364,7 @@ def calculate_trajectory_difficulty() -> int:
 
     rows: list[dict[str, Any]] = []
     skipped: list[tuple[int, str]] = []
-    for scenario in scenarios:
+    for scenario in pending_scenarios:
         path_id = int(scenario["path_id"])
         fail_time = float(scenario["fail_time"])
         baseline_run_id = int(scenario["baseline_nonfail_run_id"])
@@ -345,7 +404,6 @@ def calculate_trajectory_difficulty() -> int:
             skipped.append((path_id, str(error)))
 
     _add_difficulty_scores(rows)
-    make_trajectory_difficulty_table()
     with connect_database() as connection:
         for row in rows:
             data_input(connection=connection, **row)

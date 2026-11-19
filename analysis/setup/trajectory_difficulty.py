@@ -60,12 +60,14 @@ def _create_table(connection: duckdb.DuckDBPyConnection) -> None:
 
 def make_trajectory_difficulty_table(
     output_path: str | Path = DEFAULT_DATABASE,
+    reset: bool = False,
 ) -> Path:
-    """Create or replace the empty trajectory difficulty table."""
+    """Create or reset the trajectory difficulty table."""
     with connect_database() as connection:
-        connection.execute(
-            f"DROP TABLE IF EXISTS {TRAJECTORY_DIFFICULTY_TABLE}"
-        )
+        if reset:
+            connection.execute(
+                f"DROP TABLE IF EXISTS {TRAJECTORY_DIFFICULTY_TABLE}"
+            )
         _create_table(connection)
     return Path(output_path)
 

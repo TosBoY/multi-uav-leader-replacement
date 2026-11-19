@@ -331,6 +331,15 @@ def _load_runs() -> list[dict[str, Any]]:
     return [dict(zip(columns, row)) for row in rows]
 
 
+def _load_calculated_run_ids() -> set[int]:
+    """Load failed runs that already have aggregate metrics."""
+    with connect_database() as connection:
+        rows = connection.execute(
+            f"SELECT DISTINCT run_id FROM {FAILED_RUNS_METRICS_TABLE}"
+        ).fetchall()
+    return {int(row[0]) for row in rows}
+
+
 @lru_cache(maxsize=128)
 def _baseline_for_cached(
     path_id: int,
@@ -756,6 +765,16 @@ def calculate_metrics() -> int:
 
     make_fail_runs_drone_metrics_table()
     make_failed_runs_metrics_table()
+    calculated_run_ids = _load_calculated_run_ids()
+    calculated_run_id_list = sorted(calculated_run_ids)
+    if calculated_run_id_list:
+        print(
+            "Already calculated failed runs: "
+            f"from {calculated_run_id_list[0]} "
+            f"to {calculated_run_id_list[-1]}"
+        )
+    else:
+        print("Already calculated failed runs: none")
     processed = 0
     pending_drone_rows: list[dict[str, Any]] = []
     pending_run_rows: list[dict[str, Any]] = []
@@ -764,7 +783,6 @@ def calculate_metrics() -> int:
     flush_error: Exception | None = None
     pool_error: Exception | None = None
     fatal_error: Exception | None = None
-
     def flush_pending() -> int:
         """Write pending rows and clear them only after a successful commit."""
         if not pending_run_rows:
@@ -800,7 +818,28 @@ def calculate_metrics() -> int:
         return True
 
     groups: dict[int, dict[str, Any]] = {}
-    for raw_run in _load_runs():
+    pending_registry_runs = sorted(
+        [
+            raw_run
+            for raw_run in _load_runs()
+            if int(raw_run["run_id"]) not in calculated_run_ids
+        ],
+        key=lambda run: int(run["run_id"]),
+    )
+    pending_run_ids = [
+        int(run["run_id"])
+        for run in pending_registry_runs
+        if run["outcome"] == "done" and run["data_file"]
+    ]
+    if pending_run_ids:
+        print(
+            "Failed runs to calculate: "
+            f"from {pending_run_ids[0]} "
+            f"to {pending_run_ids[-1]}"
+        )
+    else:
+        print("Failed runs to calculate: none")
+    for raw_run in pending_registry_runs:
         run_id = int(raw_run["run_id"])
         if raw_run["outcome"] != "done" or not raw_run["data_file"]:
             not_done += 1
@@ -840,6 +879,11 @@ def calculate_metrics() -> int:
                     "runs": group_runs[start:start + CHUNK_RUNS],
                 }
             )
+    tasks.sort(
+        key=lambda task: min(int(run["run_id"]) for run in task["runs"])
+    )
+    for task in tasks:
+        task["runs"].sort(key=lambda run: int(run["run_id"]))
 
     def mark_chunk_failed(task: dict[str, Any], error: Exception) -> None:
         message = f"{type(error).__name__}: {error}"

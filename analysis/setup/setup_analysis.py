@@ -18,15 +18,15 @@ def setup_all() -> None:
     """Create analysis tables in dependency order."""
     print(
         "Created analysis.failed_runs_metrics in "
-        f"{make_failed_runs_metrics_table()}"
+        f"{make_failed_runs_metrics_table(reset=True)}"
     )
     print(
         "Created analysis.fail_runs_drone_metrics in "
-        f"{make_fail_runs_drone_metrics_table()}"
+        f"{make_fail_runs_drone_metrics_table(reset=True)}"
     )
     print(
         "Created analysis.trajectory_difficulty in "
-        f"{make_trajectory_difficulty_table()}"
+        f"{make_trajectory_difficulty_table(reset=True)}"
     )
 
 
