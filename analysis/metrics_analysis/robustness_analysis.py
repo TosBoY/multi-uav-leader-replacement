@@ -92,6 +92,79 @@ def _group_summary(
     )
 
 
+def _write_conclusion(summary: pd.DataFrame) -> None:
+    """Write a detailed, data-driven robustness conclusion."""
+    if summary.empty:
+        conclusion = "No robustness data was available.\n"
+    else:
+        def percent(value: object) -> str:
+            return "N/A" if pd.isna(value) else f"{float(value):.1f}%"
+
+        best_recovery = summary.loc[
+            summary["recovery_success_rate"].idxmax()
+        ]
+        valid_median = summary.dropna(subset=["median_settle_time"])
+        lines = [
+            "ROBUSTNESS ANALYSIS CONCLUSION",
+            "==============================",
+            "",
+            "Overall scope",
+            f"- Failed runs analysed: {int(summary['run_count'].sum())}",
+            f"- Election methods compared: {len(summary)}",
+            "",
+            "Method comparison",
+            (
+                f"- Best recovery success: "
+                f"{best_recovery['election_type']} "
+                f"({percent(best_recovery['recovery_success_rate'])})"
+            ),
+        ]
+        for _, row in summary.iterrows():
+            lines.append(
+                f"- {row['election_type']}: runs={int(row['run_count'])}, "
+                f"recovery success={percent(row['recovery_success_rate'])}, "
+                f"safety success={percent(row['safety_success_rate'])}, "
+                f"median settle={row['median_settle_time']:.3f} s, "
+                f"mean settle={row['mean_settle_time']:.3f} s, "
+                f"matched={row['mean_matched_percentage']:.1f}%, "
+                f"mean error={row['mean_error']:.3f} m, "
+                f"mean peak error={row['mean_peak_error']:.3f} m, "
+                f"minimum separation={row['mean_min_separation']:.3f} m, "
+                f"close steps={row['mean_close_steps']:.3f}"
+            )
+        if not valid_median.empty:
+            fastest = valid_median.loc[
+                valid_median["median_settle_time"].idxmin()
+            ]
+            lines.append(
+                f"- Fastest median recovery: "
+                f"{fastest['election_type']} "
+                f"({fastest['median_settle_time']:.3f} s)."
+            )
+        safest = summary.loc[summary["safety_success_rate"].idxmax()]
+        lines.append(
+            f"- Best safety success: "
+            f"{safest['election_type']} "
+            f"({percent(safest['safety_success_rate'])})"
+        )
+        lines.extend(
+            [
+                "",
+                "Interpretation",
+                (
+                    "A robust election method should combine high recovery "
+                    "and safety success with low recovery time, trajectory "
+                    "error, close-step count, and stable minimum separation."
+                ),
+            ]
+        )
+        conclusion = "\n".join(lines) + "\n"
+    (OUTPUT_DIRECTORY / "robustness_conclusion.txt").write_text(
+        conclusion,
+        encoding="utf-8",
+    )
+
+
 def _save_line_plot(
     metrics: pd.DataFrame,
     x_column: str,
@@ -172,14 +245,46 @@ def _save_category_plot(
 
 
 def _save_difficulty_scatter(metrics: pd.DataFrame) -> None:
-    """Save recovery time against trajectory difficulty."""
+    """Save binned recovery-time distributions against trajectory difficulty."""
+    valid = metrics.dropna(
+        subset=["difficulty_score", "settle_time_01"],
+    ).copy()
+    if valid.empty:
+        return
+    bin_count = min(10, valid["difficulty_score"].nunique())
+    if bin_count > 1:
+        valid["difficulty_bin"] = pd.qcut(
+            valid["difficulty_score"],
+            q=bin_count,
+            duplicates="drop",
+        )
+    else:
+        valid["difficulty_bin"] = "all"
+    grouped = (
+        valid.groupby(["election_type", "difficulty_bin"], observed=True)
+        .agg(
+            difficulty=("difficulty_score", "median"),
+            recovery_time=("settle_time_01", "median"),
+            lower=("settle_time_01", lambda values: values.quantile(0.25)),
+            upper=("settle_time_01", lambda values: values.quantile(0.75)),
+        )
+        .reset_index()
+        .sort_values("difficulty")
+    )
     figure, axis = plt.subplots(figsize=(10, 6))
-    for method, group in metrics.groupby("election_type", sort=True):
-        axis.scatter(
-            group["difficulty_score"],
-            group["settle_time_01"],
-            alpha=0.7,
+    for method, group in grouped.groupby("election_type", sort=True):
+        axis.plot(
+            group["difficulty"],
+            group["recovery_time"],
+            marker="o",
+            linewidth=2,
             label=method,
+        )
+        axis.fill_between(
+            group["difficulty"],
+            group["lower"],
+            group["upper"],
+            alpha=0.15,
         )
     figure.suptitle(
         "Recovery time versus trajectory difficulty",
@@ -189,8 +294,8 @@ def _save_difficulty_scatter(metrics: pd.DataFrame) -> None:
     figure.text(
         0.5,
         0.925,
-        "Shows whether a method remains effective as path difficulty "
-        "increases.",
+        "Lines show median recovery time in difficulty quantile bins; "
+        "shaded areas show the interquartile range.",
         ha="center",
         wrap=True,
     )
@@ -241,6 +346,7 @@ def main() -> None:
         OUTPUT_DIRECTORY / "robustness_by_difficulty.csv",
         index=False,
     )
+    _write_conclusion(method_summary)
 
     _save_line_plot(
         metrics,

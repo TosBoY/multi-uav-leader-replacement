@@ -109,6 +109,73 @@ def _method_summary(
     )
 
 
+def _write_conclusion(summary: pd.DataFrame) -> None:
+    """Write a detailed, data-driven trajectory-deviation conclusion."""
+    if summary.empty:
+        conclusion = "No trajectory-deviation data was available.\n"
+    else:
+        lowest_mean = summary.loc[summary["mean_error"].idxmin()]
+        lowest_peak = summary.loc[summary["p95_peak_error"].idxmin()]
+        lowest_drone_rms = summary.loc[
+            summary["mean_drone_rms_error"].idxmin()
+        ]
+        lines = [
+            "TRAJECTORY-DEVIATION ANALYSIS CONCLUSION",
+            "=========================================",
+            "",
+            "Overall scope",
+            f"- Failed runs analysed: {int(summary['run_count'].sum())}",
+            f"- Election methods compared: {len(summary)}",
+            "",
+            "Method comparison",
+            (
+                f"- Lowest mean trajectory deviation: "
+                f"{lowest_mean['election_type']} "
+                f"({lowest_mean['mean_error']:.3f} m)"
+            ),
+            (
+                f"- Lowest 95th-percentile peak deviation: "
+                f"{lowest_peak['election_type']} "
+                f"({lowest_peak['p95_peak_error']:.3f} m)"
+            ),
+            (
+                f"- Lowest mean per-drone RMS error: "
+                f"{lowest_drone_rms['election_type']} "
+                f"({lowest_drone_rms['mean_drone_rms_error']:.3f} m)"
+            ),
+        ]
+        for _, row in summary.iterrows():
+            lines.append(
+                f"- {row['election_type']}: runs={int(row['run_count'])}, "
+                f"mean error={row['mean_error']:.3f} m, "
+                f"mean peak error={row['peak_error']:.3f} m, "
+                f"p95 peak error={row['p95_peak_error']:.3f} m, "
+                f"mean peak-error time={row['mean_peak_error_time']:.3f} s, "
+                f"error integral={row['mean_error_integral']:.3f}, "
+                f"final error={row['mean_final_error']:.3f} m, "
+                f"per-drone RMS={row['mean_drone_rms_error']:.3f} m, "
+                f"per-drone peak={row['mean_drone_peak_error']:.3f} m, "
+                f"per-drone final={row['mean_drone_final_error']:.3f} m"
+            )
+        lines.extend(
+            [
+                "",
+                "Interpretation",
+                (
+                    "Lower mean and peak errors indicate closer tracking of "
+                    "the non-failure baseline. The 95th-percentile peak error "
+                    "describes a high-deviation case while limiting the "
+                    "influence of the single most extreme run."
+                ),
+            ]
+        )
+        conclusion = "\n".join(lines) + "\n"
+    (OUTPUT_DIRECTORY / "trajectory_deviation_conclusion.txt").write_text(
+        conclusion,
+        encoding="utf-8",
+    )
+
+
 def _save_bar_chart(
     summary: pd.DataFrame,
     columns: list[tuple[str, str]],
@@ -147,7 +214,7 @@ def _save_boxplot(
     ylabel: str,
     filename: str,
 ) -> None:
-    """Save a per-drone deviation boxplot grouped by election method."""
+    """Save a dense-data-friendly deviation distribution plot by method."""
     groups = []
     labels = []
     for method, group in metrics.groupby("election_type", sort=True):
@@ -158,12 +225,37 @@ def _save_boxplot(
     if not groups:
         return
     figure, axis = plt.subplots(figsize=(9, 6))
-    axis.boxplot(groups, tick_labels=labels)
+    positions = np.arange(1, len(groups) + 1)
+    violin = axis.violinplot(
+        groups,
+        positions=positions,
+        showmeans=False,
+        showmedians=False,
+        showextrema=False,
+    )
+    for body in violin["bodies"]:
+        body.set_facecolor("#8ecae6")
+        body.set_edgecolor("#277da1")
+        body.set_alpha(0.65)
+    axis.boxplot(
+        groups,
+        positions=positions,
+        widths=0.18,
+        tick_labels=labels,
+        showfliers=False,
+        patch_artist=True,
+        boxprops={"facecolor": "#f8f9fa", "edgecolor": "#222222"},
+        medianprops={"color": "#d00000", "linewidth": 2},
+        whiskerprops={"color": "#222222"},
+        capprops={"color": "#222222"},
+    )
     figure.suptitle(title, fontsize=14, fontweight="bold")
     figure.text(0.5, 0.925, description, ha="center", wrap=True)
     axis.set_xlabel("Election method")
     axis.set_ylabel(ylabel)
     axis.tick_params(axis="x", rotation=30)
+    axis.grid(axis="y", alpha=0.25)
+    axis.set_axisbelow(True)
     figure.tight_layout(rect=(0, 0, 1, 0.88))
     figure.savefig(OUTPUT_DIRECTORY / filename, dpi=180)
     plt.close(figure)
@@ -266,6 +358,7 @@ def main() -> None:
         OUTPUT_DIRECTORY / "trajectory_deviation_by_condition.csv",
         index=False,
     )
+    _write_conclusion(method_summary)
 
     _save_bar_chart(
         method_summary,

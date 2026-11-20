@@ -7,6 +7,7 @@ from analysis.metrics_analysis.mission_success_analysis import (
     classify_mission_tier,
     rank_mission_runs,
     _condition_summary,
+    _save_tier_distribution_by_tier,
 )
 
 
@@ -128,3 +129,19 @@ def test_condition_summary_includes_supported_scenario_dimensions():
         "number_of_drone",
         "difficulty_band",
     }
+
+
+def test_per_tier_method_plots_are_created(tmp_path, monkeypatch):
+    import analysis.metrics_analysis.mission_success_analysis as mission_module
+
+    frame = pd.DataFrame([
+        base_row(run_id=1, election_type="closest", mission_tier=tier)
+        for tier in range(5)
+    ])
+    monkeypatch.setattr(mission_module, "OUTPUT_DIRECTORY", tmp_path)
+    mission_module._save_tier_distribution_by_tier(frame)
+
+    for tier in range(5):
+        plot_path = tmp_path / f"mission_tier_{tier}_by_method.png"
+        assert plot_path.exists()
+        assert plot_path.stat().st_size > 0

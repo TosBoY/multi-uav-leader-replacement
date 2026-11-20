@@ -160,6 +160,115 @@ def _method_summary(
     return summary.sort_values("election_type").reset_index(drop=True)
 
 
+def _write_conclusion(
+    summary: pd.DataFrame,
+    condition_summary: pd.DataFrame,
+) -> None:
+    """Write a detailed, data-driven recovery-performance conclusion."""
+    if summary.empty:
+        conclusion = "No recovery-performance data was available.\n"
+    else:
+        def percent(value: object) -> str:
+            return "N/A" if pd.isna(value) else f"{float(value):.1f}%"
+
+        best_success = summary.loc[
+            summary["recovery_success_rate_01"].idxmax()
+        ]
+        best_fine_success = summary.loc[
+            summary["recovery_success_rate_002"].idxmax()
+        ]
+        valid_median = summary.dropna(subset=["median_settle_time_01"])
+        lines = [
+            "RECOVERY-PERFORMANCE ANALYSIS CONCLUSION",
+            "=========================================",
+            "",
+            "Overall scope",
+            f"- Failed runs analysed: {int(summary['run_count'].sum())}",
+            f"- Election methods compared: {len(summary)}",
+            "",
+            "Method comparison",
+            (
+                f"- Best loose-tolerance recovery: "
+                f"{best_success['election_type']} "
+                f"({percent(best_success['recovery_success_rate_01'])})"
+            ),
+            (
+                f"- Best tight-tolerance recovery: "
+                f"{best_fine_success['election_type']} "
+                f"({percent(best_fine_success['recovery_success_rate_002'])})"
+            ),
+        ]
+        for _, row in summary.iterrows():
+            lines.append(
+                f"- {row['election_type']}: runs={int(row['run_count'])}, "
+                f"loose success={percent(row['recovery_success_rate_01'])}, "
+                f"tight success={percent(row['recovery_success_rate_002'])}, "
+                f"median settle={row['median_settle_time_01']:.3f} s, "
+                f"p95 settle={row['p95_settle_time_01']:.3f} s, "
+                f"matched={row['mean_matched_percentage_01']:.1f}%, "
+                f"unstable={row['mean_unstable_percentage_01']:.1f}%, "
+                f"never matched="
+                f"{row['mean_never_matched_percentage_01']:.1f}%, "
+                f"excursions={row['mean_excursions_01']:.3f}"
+            )
+        if not valid_median.empty:
+            fastest = valid_median.loc[
+                valid_median["median_settle_time_01"].idxmin()
+            ]
+            lines.append(
+                f"- Fastest median loose-tolerance recovery: "
+                f"{fastest['election_type']} "
+                f"({fastest['median_settle_time_01']:.3f} s)."
+            )
+        valid_conditions = condition_summary.dropna(
+            subset=["recovery_success_rate_01"],
+        )
+        if not valid_conditions.empty:
+            best_condition = valid_conditions.loc[
+                valid_conditions["recovery_success_rate_01"].idxmax()
+            ]
+            worst_condition = valid_conditions.loc[
+                valid_conditions["recovery_success_rate_01"].idxmin()
+            ]
+            lines.extend(
+                [
+                    "",
+                    "Condition comparison",
+                    (
+                        f"- Strongest condition: "
+                        f"{best_condition['condition']}="
+                        f"{best_condition['condition_value']} for "
+                        f"{best_condition['election_type']} "
+                        f"({percent(best_condition['recovery_success_rate_01'])})"
+                    ),
+                    (
+                        f"- Weakest condition: "
+                        f"{worst_condition['condition']}="
+                        f"{worst_condition['condition_value']} for "
+                        f"{worst_condition['election_type']} "
+                        f"({percent(worst_condition['recovery_success_rate_01'])})"
+                    ),
+                ]
+            )
+        lines.extend(
+            [
+                "",
+                "Interpretation",
+                (
+                    "Higher success and matched percentages indicate more "
+                    "complete recovery. Lower settle time, instability, "
+                    "never-matched percentage, and excursion counts indicate "
+                    "more reliable recovery."
+                ),
+            ]
+        )
+        conclusion = "\n".join(lines) + "\n"
+    (OUTPUT_DIRECTORY / "recovery_performance_conclusion.txt").write_text(
+        conclusion,
+        encoding="utf-8",
+    )
+
+
 def _save_boxplot(
     metrics: pd.DataFrame,
     column: str,
@@ -168,7 +277,7 @@ def _save_boxplot(
     ylabel: str,
     filename: str,
 ) -> None:
-    """Save a boxplot grouped by election method."""
+    """Save a dense-data-friendly distribution plot grouped by election method."""
     groups = []
     labels = []
     for method, group in metrics.groupby("election_type", sort=True):
@@ -179,12 +288,37 @@ def _save_boxplot(
     if not groups:
         return
     figure, axis = plt.subplots(figsize=(9, 6))
-    axis.boxplot(groups, tick_labels=labels)
+    positions = np.arange(1, len(groups) + 1)
+    violin = axis.violinplot(
+        groups,
+        positions=positions,
+        showmeans=False,
+        showmedians=False,
+        showextrema=False,
+    )
+    for body in violin["bodies"]:
+        body.set_facecolor("#8ecae6")
+        body.set_edgecolor("#277da1")
+        body.set_alpha(0.65)
+    axis.boxplot(
+        groups,
+        positions=positions,
+        widths=0.18,
+        tick_labels=labels,
+        showfliers=False,
+        patch_artist=True,
+        boxprops={"facecolor": "#f8f9fa", "edgecolor": "#222222"},
+        medianprops={"color": "#d00000", "linewidth": 2},
+        whiskerprops={"color": "#222222"},
+        capprops={"color": "#222222"},
+    )
     figure.suptitle(title, fontsize=14, fontweight="bold")
     figure.text(0.5, 0.925, description, ha="center", wrap=True)
     axis.set_xlabel("Election method")
     axis.set_ylabel(ylabel)
     axis.tick_params(axis="x", rotation=30)
+    axis.grid(axis="y", alpha=0.25)
+    axis.set_axisbelow(True)
     figure.tight_layout(rect=(0, 0, 1, 0.88))
     figure.savefig(OUTPUT_DIRECTORY / filename, dpi=180)
     plt.close(figure)
@@ -317,6 +451,7 @@ def main() -> None:
         OUTPUT_DIRECTORY / "recovery_by_condition.csv",
         index=False,
     )
+    _write_conclusion(summary, condition_summary)
 
     _save_boxplot(
         run_metrics,

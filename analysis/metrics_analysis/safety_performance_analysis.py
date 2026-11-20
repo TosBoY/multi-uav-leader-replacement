@@ -95,6 +95,79 @@ def _method_summary(metrics: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
+def _write_conclusion(summary: pd.DataFrame) -> None:
+    """Write a detailed, data-driven safety conclusion."""
+    if summary.empty:
+        conclusion = "No safety-performance data was available.\n"
+    else:
+        def percent(value: object) -> str:
+            return "N/A" if pd.isna(value) else f"{float(value):.1f}%"
+
+        safest = summary.loc[summary["safety_success_rate"].idxmax()]
+        strongest_margin = summary.loc[
+            summary["median_min_separation"].idxmax()
+        ]
+        fewest_violations = summary.loc[
+            summary["mean_close_steps"].idxmin()
+        ]
+        lines = [
+            "SAFETY-PERFORMANCE ANALYSIS CONCLUSION",
+            "=======================================",
+            "",
+            "Overall scope",
+            f"- Failed runs analysed: {int(summary['run_count'].sum())}",
+            f"- Election methods compared: {len(summary)}",
+            "",
+            "Method comparison",
+            (
+                f"- Best safety success: {safest['election_type']} "
+                f"({percent(safest['safety_success_rate'])})"
+            ),
+            (
+                f"- Largest median minimum-separation margin: "
+                f"{strongest_margin['election_type']} "
+                f"({strongest_margin['median_min_separation']:.3f} m)"
+            ),
+            (
+                f"- Fewest mean close-threshold steps: "
+                f"{fewest_violations['election_type']} "
+                f"({fewest_violations['mean_close_steps']:.3f} steps)"
+            ),
+        ]
+        for _, row in summary.iterrows():
+            lines.append(
+                f"- {row['election_type']}: runs={int(row['run_count'])}, "
+                f"safety success={percent(row['safety_success_rate'])}, "
+                f"mean separation={row['mean_min_separation']:.3f} m, "
+                f"median separation={row['median_min_separation']:.3f} m, "
+                f"5th-percentile separation="
+                f"{row['p05_min_separation']:.3f} m, "
+                f"mean close steps={row['mean_close_steps']:.3f}, "
+                f"total close steps={row['total_close_steps']:.0f}, "
+                f"change from baseline="
+                f"{row['mean_separation_change_from_baseline']:.3f} m, "
+                f"ratio to baseline="
+                f"{row['mean_separation_ratio_to_baseline']:.3f}"
+            )
+        lines.extend(
+            [
+                "",
+                "Interpretation",
+                (
+                    "Higher separation and safety-success values indicate "
+                    "greater safety margin. Lower close-step counts indicate "
+                    "fewer threshold violations. A negative change from "
+                    "baseline means the failure reduced separation."
+                ),
+            ]
+        )
+        conclusion = "\n".join(lines) + "\n"
+    (OUTPUT_DIRECTORY / "safety_performance_conclusion.txt").write_text(
+        conclusion,
+        encoding="utf-8",
+    )
+
+
 def _save_bar_chart(
     summary: pd.DataFrame,
     columns: list[tuple[str, str]],
@@ -133,7 +206,7 @@ def _save_boxplot(
     ylabel: str,
     filename: str,
 ) -> None:
-    """Save a safety boxplot grouped by election method."""
+    """Save a dense-data-friendly safety distribution plot by method."""
     groups = []
     labels = []
     for method, group in metrics.groupby("election_type", sort=True):
@@ -144,12 +217,37 @@ def _save_boxplot(
     if not groups:
         return
     figure, axis = plt.subplots(figsize=(9, 6))
-    axis.boxplot(groups, tick_labels=labels)
+    positions = np.arange(1, len(groups) + 1)
+    violin = axis.violinplot(
+        groups,
+        positions=positions,
+        showmeans=False,
+        showmedians=False,
+        showextrema=False,
+    )
+    for body in violin["bodies"]:
+        body.set_facecolor("#8ecae6")
+        body.set_edgecolor("#277da1")
+        body.set_alpha(0.65)
+    axis.boxplot(
+        groups,
+        positions=positions,
+        widths=0.18,
+        tick_labels=labels,
+        showfliers=False,
+        patch_artist=True,
+        boxprops={"facecolor": "#f8f9fa", "edgecolor": "#222222"},
+        medianprops={"color": "#d00000", "linewidth": 2},
+        whiskerprops={"color": "#222222"},
+        capprops={"color": "#222222"},
+    )
     figure.suptitle(title, fontsize=14, fontweight="bold")
     figure.text(0.5, 0.925, description, ha="center", wrap=True)
     axis.set_xlabel("Election method")
     axis.set_ylabel(ylabel)
     axis.tick_params(axis="x", rotation=30)
+    axis.grid(axis="y", alpha=0.25)
+    axis.set_axisbelow(True)
     figure.tight_layout(rect=(0, 0, 1, 0.88))
     figure.savefig(OUTPUT_DIRECTORY / filename, dpi=180)
     plt.close(figure)
@@ -243,6 +341,7 @@ def main() -> None:
         OUTPUT_DIRECTORY / "safety_by_condition.csv",
         index=False,
     )
+    _write_conclusion(summary)
 
     _save_bar_chart(
         summary,
